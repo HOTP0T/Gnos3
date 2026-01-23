@@ -132,7 +132,7 @@ async def get_headers_and_cookies(
         **(
             {
                 "HTTP-Referer": "https://openwebui.com/",
-                "X-Title": "Open WebUI",
+                "X-Title": "Gnos3",
             }
             if "openrouter.ai" in url
             else {}
@@ -142,7 +142,7 @@ async def get_headers_and_cookies(
     if ENABLE_FORWARD_USER_INFO_HEADERS and user:
         headers = include_user_info_headers(headers, user)
         if metadata and metadata.get("chat_id"):
-            headers["X-OpenWebUI-Chat-Id"] = metadata.get("chat_id")
+            headers["X-Gnos3-Chat-Id"] = metadata.get("chat_id")
 
     token = None
     auth_type = config.get("auth_type")
@@ -336,7 +336,7 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 
             raise HTTPException(
                 status_code=r.status_code if r else 500,
-                detail=detail if detail else "Open WebUI: Server Connection Error",
+                detail=detail if detail else "Gnos3: Server Connection Error",
             )
 
     except ValueError:
@@ -615,7 +615,7 @@ async def get_models(
                 # ClientError covers all aiohttp requests issues
                 log.exception(f"Client error: {str(e)}")
                 raise HTTPException(
-                    status_code=500, detail="Open WebUI: Server Connection Error"
+                    status_code=500, detail="Gnos3: Server Connection Error"
                 )
             except Exception as e:
                 log.exception(f"Unexpected error: {e}")
@@ -712,12 +712,12 @@ async def verify_connection(
             # ClientError covers all aiohttp requests issues
             log.exception(f"Client error: {str(e)}")
             raise HTTPException(
-                status_code=500, detail="Open WebUI: Server Connection Error"
+                status_code=500, detail="Gnos3: Server Connection Error"
             )
         except Exception as e:
             log.exception(f"Unexpected error: {e}")
             raise HTTPException(
-                status_code=500, detail="Open WebUI: Server Connection Error"
+                status_code=500, detail="Gnos3: Server Connection Error"
             )
 
 
@@ -978,7 +978,7 @@ async def generate_chat_completion(
 
         raise HTTPException(
             status_code=r.status if r else 500,
-            detail="Open WebUI: Server Connection Error",
+            detail="Gnos3: Server Connection Error",
         )
     finally:
         if not streaming:
@@ -1060,7 +1060,7 @@ async def embeddings(request: Request, form_data: dict, user):
         log.exception(e)
         raise HTTPException(
             status_code=r.status if r else 500,
-            detail="Open WebUI: Server Connection Error",
+            detail="Gnos3: Server Connection Error",
         )
     finally:
         if not streaming:
@@ -1153,7 +1153,7 @@ async def proxy(path: str, request: Request, user=Depends(get_verified_user)):
         log.exception(e)
         raise HTTPException(
             status_code=r.status if r else 500,
-            detail="Open WebUI: Server Connection Error",
+            detail="Gnos3: Server Connection Error",
         )
     finally:
         if not streaming:

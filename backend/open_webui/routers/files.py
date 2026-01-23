@@ -263,10 +263,10 @@ def upload_file_handler(
             file.file,
             filename,
             {
-                "OpenWebUI-User-Email": user.email,
-                "OpenWebUI-User-Id": user.id,
-                "OpenWebUI-User-Name": user.name,
-                "OpenWebUI-File-Id": id,
+                "Gnos3-User-Email": user.email,
+                "Gnos3-User-Id": user.id,
+                "Gnos3-User-Name": user.name,
+                "Gnos3-File-Id": id,
             },
         )
 

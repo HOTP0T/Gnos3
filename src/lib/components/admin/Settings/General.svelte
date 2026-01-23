@@ -190,7 +190,7 @@
 									{$i18n.t('Help')}
 								</div>
 								<div class=" text-xs text-gray-500">
-									{$i18n.t('Discover how to use Open WebUI and seek support from the community.')}
+									{$i18n.t('Discover how to use Gnos3 and seek support from the community.')}
 								</div>
 							</div>
 
@@ -208,17 +208,11 @@
 								<a href="https://discord.gg/5rJgQTnV4s" target="_blank">
 									<img
 										alt="Discord"
-										src="https://img.shields.io/badge/Discord-Open_WebUI-blue?logo=discord&logoColor=white"
+										src="https://img.shields.io/badge/Discord-Gnos3-blue?logo=discord&logoColor=white"
 									/>
 								</a>
 
-								<a href="https://twitter.com/OpenWebUI" target="_blank">
-									<img
-										alt="X (formerly Twitter) Follow"
-										src="https://img.shields.io/twitter/follow/OpenWebUI"
-									/>
-								</a>
-
+								
 								<a href="https://github.com/open-webui/open-webui" target="_blank">
 									<img
 										alt="Github Repo"

@@ -51,7 +51,13 @@
 		>
 			<img
 				src="{WEBUI_BASE_URL}/static/favicon.png"
-				class="size-10 {selected === '' ? 'rounded-2xl' : 'rounded-full'}"
+				class="size-10 {selected === '' ? 'rounded-2xl' : 'rounded-full'} dark:hidden"
+				alt="logo"
+				draggable="false"
+			/>
+			<img
+				src="{WEBUI_BASE_URL}/static/favicon-dark.png"
+				class="size-10 {selected === '' ? 'rounded-2xl' : 'rounded-full'} hidden dark:block"
 				alt="logo"
 				draggable="false"
 			/>
