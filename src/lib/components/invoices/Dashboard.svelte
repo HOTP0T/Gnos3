@@ -4,7 +4,7 @@
 	import { toast } from 'svelte-sonner';
 	import dayjs from 'dayjs';
 
-	import { getInvoices, getVendors, getSpendingSummary, getNeedsReview } from '$lib/apis/invoices';
+	import { getInvoices, getVendors, getSpendingSummary, getNeedsReview, getProcessingInvoices, getInvoiceStats } from '$lib/apis/invoices';
 	import { theme } from '$lib/stores';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -19,10 +19,8 @@
 
 	// Stats
 	let totalInvoices = 0;
-	let totalSpending = 0;
 	let needsReviewCount = 0;
 	let vendorCount = 0;
-	let currency = 'USD';
 
 	// Chart data
 	let monthlyData: Array<{ period: string; total_amount: number; invoice_count: number }> = [];
@@ -30,6 +28,11 @@
 
 	// Needs review list
 	let reviewInvoices: any[] = [];
+
+	// Processing invoices
+	let processingCount = 0;
+	let processingInvoices: any[] = [];
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Chart instances
 	let monthlyCanvas: HTMLCanvasElement;
@@ -41,30 +44,33 @@
 	const loadData = async () => {
 		loading = true;
 		try {
-			const [invoicesRes, vendors, monthly, byVendor, review] = await Promise.all([
-				getInvoices(localStorage.token, { limit: 1, offset: 0 }),
+			const [stats, vendors, monthly, byVendor, review, processing] = await Promise.all([
+				getInvoiceStats(localStorage.token),
 				getVendors(localStorage.token),
 				getSpendingSummary(localStorage.token, { period: 'monthly' }),
 				getSpendingSummary(localStorage.token, { period: 'by_vendor' }),
-				getNeedsReview(localStorage.token)
+				getNeedsReview(localStorage.token),
+				getProcessingInvoices(localStorage.token)
 			]);
 
 			vendorCount = vendors?.length ?? 0;
-			// Use vendor invoice_count sum for accurate total (works with both old and new API)
-			totalInvoices = (vendors ?? []).reduce(
-				(sum: number, v: any) => sum + (v.invoice_count || 0),
-				0
-			);
+			totalInvoices = stats?.total ?? 0;
 			needsReviewCount = review?.length ?? 0;
 			reviewInvoices = (review ?? []).slice(0, 10);
 
-			totalSpending = (vendors ?? []).reduce(
-				(sum: number, v: any) => sum + parseFloat(v.total_amount || '0'),
-				0
-			);
+			processingCount = stats?.processing ?? 0;
+			processingInvoices = (processing?.invoices ?? []).slice(0, 10);
 
 			monthlyData = monthly ?? [];
 			vendorData = (byVendor ?? []).slice(0, 10);
+
+			// Auto-refresh every 5 seconds while invoices are processing
+			if (processingCount > 0 && !refreshInterval) {
+				refreshInterval = setInterval(() => loadData(), 5000);
+			} else if (processingCount === 0 && refreshInterval) {
+				clearInterval(refreshInterval);
+				refreshInterval = null;
+			}
 		} catch (err) {
 			toast.error(`${err}`);
 		}
@@ -215,6 +221,10 @@
 	});
 
 	onDestroy(() => {
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+			refreshInterval = null;
+		}
 		if (monthlyChart) {
 			monthlyChart.destroy();
 			monthlyChart = null;
@@ -246,30 +256,30 @@
 			</div>
 
 			<div
-				class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30"
+				class="bg-white dark:bg-gray-900 rounded-xl p-4 border {processingCount > 0 ? 'border-blue-200 dark:border-blue-800/50' : 'border-gray-100/30 dark:border-gray-850/30'}"
 			>
 				<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
-					{$i18n.t('Total Spending')}
+					{$i18n.t('Processing')}
 				</div>
-				<div class="text-2xl font-medium dark:text-gray-200">
-					${totalSpending.toLocaleString(undefined, {
-						minimumFractionDigits: 2,
-						maximumFractionDigits: 2
-					})}
+				<div class="text-2xl font-medium dark:text-gray-200 flex items-center gap-2">
+					{processingCount}
+					{#if processingCount > 0}
+						<Spinner className="size-4" />
+					{/if}
 				</div>
 			</div>
 
 			<button
-				class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30 text-left cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
+				class="bg-white dark:bg-gray-900 rounded-xl p-4 border {needsReviewCount > 0 ? 'border-orange-200 dark:border-orange-800/50' : 'border-gray-100/30 dark:border-gray-850/30'} text-left cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
 				on:click={() => goto('/invoices/data?needs_review=true')}
 			>
 				<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
-					{$i18n.t('Needs Review')}
+					{$i18n.t('Needs Attention')}
 				</div>
 				<div class="text-2xl font-medium dark:text-gray-200 flex items-center gap-2">
 					{needsReviewCount}
 					{#if needsReviewCount > 0}
-						<Badge type="warning" content={$i18n.t('Attention')} />
+						<Badge type="warning" content={$i18n.t('Review')} />
 					{/if}
 				</div>
 			</button>
@@ -285,6 +295,19 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- Processing Banner -->
+		{#if processingCount > 0}
+			<div
+				class="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-200/50 dark:border-blue-800/30 flex items-center gap-3"
+			>
+				<Spinner className="size-4 text-blue-500" />
+				<div class="text-sm text-blue-700 dark:text-blue-300">
+					{processingCount} {processingCount === 1 ? 'invoice is' : 'invoices are'} currently being processed.
+					{$i18n.t('This page will update automatically.')}
+				</div>
+			</div>
+		{/if}
 
 		<!-- Charts -->
 		<div class="grid grid-cols-1 lg:grid-cols-2 gap-3">

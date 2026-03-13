@@ -11,7 +11,9 @@
 	export let maxAmount: string = '';
 	export let status = '';
 	export let needsReview: boolean | undefined = undefined;
+	export let tag = '';
 	export let show = false;
+	export let availableTags: string[] = [];
 
 	const applyFilters = () => {
 		dispatch('filter', {
@@ -21,7 +23,8 @@
 			min_amount: minAmount ? parseFloat(minAmount) : undefined,
 			max_amount: maxAmount ? parseFloat(maxAmount) : undefined,
 			status: status || undefined,
-			needs_review: needsReview
+			needs_review: needsReview,
+			tag: tag || undefined
 		});
 	};
 
@@ -33,6 +36,7 @@
 		maxAmount = '';
 		status = '';
 		needsReview = undefined;
+		tag = '';
 		applyFilters();
 	};
 </script>
@@ -86,6 +90,7 @@
 				>
 					<option value="">{$i18n.t('All')}</option>
 					<option value="completed">{$i18n.t('Completed')}</option>
+					<option value="processing">{$i18n.t('Processing')}</option>
 					<option value="pending">{$i18n.t('Pending')}</option>
 					<option value="failed">{$i18n.t('Failed')}</option>
 				</select>
@@ -141,5 +146,23 @@
 				</button>
 			</div>
 		</div>
+
+		{#if availableTags.length > 0}
+			<div class="mt-2 flex flex-wrap gap-1.5">
+				{#each availableTags as t}
+					<button
+						class="text-xs px-2 py-0.5 rounded-full border transition {tag === t
+							? 'bg-blue-500 border-blue-500 text-white'
+							: 'bg-transparent border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-400 hover:text-blue-500'}"
+						on:click={() => {
+							tag = tag === t ? '' : t;
+							applyFilters();
+						}}
+					>
+						{t}
+					</button>
+				{/each}
+			</div>
+		{/if}
 	</div>
 {/if}

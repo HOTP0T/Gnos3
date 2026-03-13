@@ -3,6 +3,7 @@ import { INVOICE_API_BASE_URL } from '$lib/constants';
 export const getInvoices = async (
 	token: string,
 	params?: {
+		q?: string;
 		vendor?: string;
 		date_from?: string;
 		date_to?: string;
@@ -12,6 +13,8 @@ export const getInvoices = async (
 		needs_review?: boolean;
 		tag?: string;
 		notes_search?: string;
+		sort_by?: string;
+		sort_dir?: 'asc' | 'desc';
 		limit?: number;
 		offset?: number;
 	}
@@ -20,6 +23,7 @@ export const getInvoices = async (
 
 	const searchParams = new URLSearchParams();
 	if (params) {
+		if (params.q) searchParams.set('q', params.q);
 		if (params.vendor) searchParams.set('vendor', params.vendor);
 		if (params.date_from) searchParams.set('date_from', params.date_from);
 		if (params.date_to) searchParams.set('date_to', params.date_to);
@@ -29,6 +33,8 @@ export const getInvoices = async (
 		if (params.needs_review !== undefined) searchParams.set('needs_review', params.needs_review.toString());
 		if (params.tag) searchParams.set('tag', params.tag);
 		if (params.notes_search) searchParams.set('notes_search', params.notes_search);
+		if (params.sort_by) searchParams.set('sort_by', params.sort_by);
+		if (params.sort_dir) searchParams.set('sort_dir', params.sort_dir);
 		if (params.limit !== undefined) searchParams.set('limit', params.limit.toString());
 		if (params.offset !== undefined) searchParams.set('offset', params.offset.toString());
 	}
@@ -168,6 +174,22 @@ export const getVendors = async (token: string) => {
 	return res;
 };
 
+export const getTags = async (token: string): Promise<string[]> => {
+	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/tags`, {
+		method: 'GET',
+		headers: { 'Content-Type': 'application/json' }
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			return [];
+		});
+	return res ?? [];
+};
+
 export const getSpendingSummary = async (
 	token: string,
 	params?: { period?: string; year?: number; vendor?: string }
@@ -190,6 +212,90 @@ export const getSpendingSummary = async (
 			}
 		}
 	)
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getProcessingInvoices = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices?status=processing&limit=50`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json'
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.then((data) => {
+			if (Array.isArray(data)) {
+				return { invoices: data, total: data.length };
+			}
+			return data;
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const getInvoiceStats = async (token: string) => {
+	let error = null;
+
+	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/stats`, {
+		method: 'GET',
+		headers: {
+			'Content-Type': 'application/json'
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const reprocessInvoice = async (token: string, id: number) => {
+	let error = null;
+
+	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/${id}/reprocess`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json'
+		}
+	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
 			return res.json();
