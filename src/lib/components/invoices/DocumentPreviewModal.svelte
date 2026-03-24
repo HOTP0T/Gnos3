@@ -5,6 +5,7 @@
 
 	import Modal from '$lib/components/common/Modal.svelte';
 	import { updateInvoice } from '$lib/apis/invoices';
+	import { INVOICE_API_BASE_URL, K4MI_BASE_URL } from '$lib/constants';
 
 	const i18n = getContext('i18n');
 
@@ -12,7 +13,7 @@
 	export let invoice: any = null;
 	export let onUpdate: (updated: any) => void = () => {};
 
-	const INVOICE_API_BASE = 'http://localhost:8001';
+	const INVOICE_API_BASE = INVOICE_API_BASE_URL;
 
 	$: previewUrl = invoice ? `${INVOICE_API_BASE}/api/invoices/${invoice.id}/preview` : '';
 
@@ -131,9 +132,9 @@
 				{$i18n.t('Document Preview')}
 			</div>
 			<div class="flex items-center gap-2">
-				{#if invoice?.k4mi_document_url}
+				{#if invoice?.k4mi_document_id}
 					<a
-						href={invoice.k4mi_document_url}
+						href="{K4MI_BASE_URL}/documents/{invoice.k4mi_document_id}/details"
 						target="_blank"
 						rel="noopener noreferrer"
 						class="text-xs px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-lg font-medium dark:text-gray-200"

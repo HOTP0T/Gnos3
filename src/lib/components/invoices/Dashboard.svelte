@@ -5,6 +5,7 @@
 	import dayjs from 'dayjs';
 
 	import { getInvoices, getVendors, getSpendingSummary, getNeedsReview, getProcessingInvoices, getInvoiceStats } from '$lib/apis/invoices';
+	import { K4MI_BASE_URL } from '$lib/constants';
 	import { theme } from '$lib/stores';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -420,7 +421,7 @@
 									<!-- svelte-ignore a11y-click-events-have-key-events -->
 									<!-- svelte-ignore a11y-no-static-element-interactions -->
 									<a
-										href="http://localhost:8000/documents/{invoice.k4mi_document_id}/details"
+										href="{K4MI_BASE_URL}/documents/{invoice.k4mi_document_id}/details"
 										target="_blank"
 										rel="noopener noreferrer"
 										class="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"

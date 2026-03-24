@@ -15,8 +15,14 @@ export const RETRIEVAL_API_BASE_URL = `${WEBUI_BASE_URL}/api/v1/retrieval`;
 
 export const INVOICE_API_BASE_URL = browser
 	? dev
-		? 'http://localhost:8001'
+		? `http://${location.hostname}:8001`
 		: `${location.origin}:8001`
+	: '';
+
+export const K4MI_BASE_URL = browser
+	? dev
+		? `http://${location.hostname}:8000`
+		: `${location.origin}:8000`
 	: '';
 
 export const WEBUI_VERSION = APP_VERSION;
