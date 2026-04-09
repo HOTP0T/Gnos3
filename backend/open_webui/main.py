@@ -97,6 +97,7 @@ from open_webui.routers import (
     utils,
     scim,
     terminals,
+    data_connectors,
 )
 
 from open_webui.routers.retrieval import (
@@ -647,6 +648,9 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(periodic_usage_pool_cleanup())
     asyncio.create_task(periodic_session_pool_cleanup())
+
+    from open_webui.services.data_connector_worker import data_connector_sync_worker
+    asyncio.create_task(data_connector_sync_worker(app))
 
     if app.state.config.ENABLE_BASE_MODELS_CACHE:
         try:
@@ -1542,6 +1546,7 @@ app.include_router(notes.router, prefix="/api/v1/notes", tags=["notes"])
 
 app.include_router(models.router, prefix="/api/v1/models", tags=["models"])
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["knowledge"])
+app.include_router(data_connectors.router, prefix="/api/v1/data-connectors", tags=["data-connectors"])
 app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["prompts"])
 app.include_router(tools.router, prefix="/api/v1/tools", tags=["tools"])
 app.include_router(skills.router, prefix="/api/v1/skills", tags=["skills"])

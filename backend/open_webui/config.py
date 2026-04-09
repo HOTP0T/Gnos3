@@ -2859,6 +2859,22 @@ ENABLE_RAG_HYBRID_SEARCH = PersistentConfig(
     os.environ.get("ENABLE_RAG_HYBRID_SEARCH", "").lower() == "true",
 )
 
+####################################
+# Data Connectors
+####################################
+
+ENABLE_DATA_CONNECTORS = PersistentConfig(
+    "ENABLE_DATA_CONNECTORS",
+    "data_connectors.enable",
+    os.environ.get("ENABLE_DATA_CONNECTORS", "True").lower() == "true",
+)
+
+DATA_CONNECTOR_SYNC_INTERVAL = PersistentConfig(
+    "DATA_CONNECTOR_SYNC_INTERVAL",
+    "data_connectors.default_sync_interval",
+    int(os.environ.get("DATA_CONNECTOR_SYNC_INTERVAL", "3600")),
+)
+
 ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS = PersistentConfig(
     "ENABLE_RAG_HYBRID_SEARCH_ENRICHED_TEXTS",
     "rag.enable_hybrid_search_enriched_texts",

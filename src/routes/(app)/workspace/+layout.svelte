@@ -144,6 +144,19 @@
 								{$i18n.t('Tools')}
 							</a>
 						{/if}
+
+						{#if $user?.role === 'admin'}
+							<a
+								draggable="false"
+								aria-current={$page.url.pathname.includes('/workspace/datasources') ? 'page' : null}
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/workspace/datasources')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								href="/workspace/datasources"
+							>
+								{$i18n.t('Data Sources')}
+							</a>
+						{/if}
 					</div>
 				</div>
 
