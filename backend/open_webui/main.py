@@ -2604,7 +2604,15 @@ async def healthcheck_with_db():
     return {"status": True}
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+_static_app = StaticFiles(directory=STATIC_DIR)
+_static_app = CORSMiddleware(
+    _static_app,
+    allow_origins=CORS_ALLOW_ORIGIN,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.mount("/static", _static_app, name="static")
 
 
 @app.get("/cache/{path:path}")
