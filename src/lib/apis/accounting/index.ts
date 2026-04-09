@@ -4,6 +4,15 @@ const BASE = `${INVOICE_API_BASE_URL}/api/accounting`;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+async function parseErrorResponse(res: Response): Promise<any> {
+	try {
+		return await res.json();
+	} catch {
+		const text = await res.text().catch(() => '');
+		return { detail: text || `HTTP ${res.status}` };
+	}
+}
+
 async function apiGet(path: string, params?: Record<string, string | number | boolean | undefined>) {
 	const searchParams = new URLSearchParams();
 	if (params) {
@@ -14,7 +23,7 @@ async function apiGet(path: string, params?: Record<string, string | number | bo
 	const qs = searchParams.toString();
 	const url = qs ? `${BASE}${path}?${qs}` : `${BASE}${path}`;
 	const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
-	if (!res.ok) throw await res.json();
+	if (!res.ok) throw await parseErrorResponse(res);
 	return res.json();
 }
 
@@ -32,7 +41,7 @@ async function apiPost(path: string, body?: any, params?: Record<string, string 
 		headers: { 'Content-Type': 'application/json' },
 		body: body !== undefined ? JSON.stringify(body) : undefined
 	});
-	if (!res.ok) throw await res.json();
+	if (!res.ok) throw await parseErrorResponse(res);
 	return res.json();
 }
 
@@ -42,7 +51,7 @@ async function apiPatch(path: string, body: any) {
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(body)
 	});
-	if (!res.ok) throw await res.json();
+	if (!res.ok) throw await parseErrorResponse(res);
 	return res.json();
 }
 
@@ -51,7 +60,7 @@ async function apiDelete(path: string) {
 		method: 'DELETE',
 		headers: { 'Content-Type': 'application/json' }
 	});
-	if (!res.ok) throw await res.json();
+	if (!res.ok) throw await parseErrorResponse(res);
 	if (res.status === 204) return;
 	return res.json();
 }
@@ -149,6 +158,32 @@ export const downloadBankStatementTemplate = () => {
 	window.open(`${BASE}/templates/bank-statement-template`, '_blank');
 };
 
+// ─── Report Exports ─────────────────────────────────────────────────────────
+
+export const exportTrialBalance = (params: { company_id: number; as_of?: string; period_start?: string; ytd_start?: string }) => {
+	const qs = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
+	window.open(`${BASE}/reports/trial-balance/export?${qs}`, '_blank');
+};
+
+export const exportProfitLoss = (params: { company_id: number; date_from: string; date_to: string; ytd_start?: string }) => {
+	const qs = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
+	window.open(`${BASE}/reports/profit-loss/export?${qs}`, '_blank');
+};
+
+export const exportBalanceSheet = (params: { company_id: number; as_of?: string; period_start?: string }) => {
+	const qs = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
+	window.open(`${BASE}/reports/balance-sheet/export?${qs}`, '_blank');
+};
+
+export const exportGeneralLedger = (params: { company_id: number; date_from?: string; date_to?: string }) => {
+	const qs = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
+	window.open(`${BASE}/reports/general-ledger/export?${qs}`, '_blank');
+};
+
 // ─── Period Templates ───────────────────────────────────────────────────────
 
 export const getPeriodTemplates = async () =>
@@ -229,8 +264,8 @@ export const getTransactions = async (params?: {
 	offset?: number;
 }) => apiGet('/transactions', params as any);
 
-export const createTransaction = async (data: Record<string, any>, company_id?: number) =>
-	apiPost('/transactions', data, { company_id });
+export const createTransaction = async (data: Record<string, any>, company_id?: number, auto_pay?: boolean, bank_statement_line_id?: number) =>
+	apiPost('/transactions', data, { company_id, auto_pay, bank_statement_line_id });
 
 export const getTransaction = async (id: number) =>
 	apiGet(`/transactions/${id}`);
@@ -243,6 +278,9 @@ export const deleteTransaction = async (id: number) =>
 
 export const postTransaction = async (id: number) =>
 	apiPost(`/transactions/${id}/post`);
+
+export const bulkPostTransactions = async (params: { company_id: number; period_start?: string; period_end?: string }) =>
+	apiPost('/transactions/bulk-post', undefined, params as any);
 
 export const voidTransaction = async (id: number) =>
 	apiPost(`/transactions/${id}/void`);
@@ -260,8 +298,8 @@ export const getPayments = async (params?: {
 	offset?: number;
 }) => apiGet('/payments', params as any);
 
-export const createPayment = async (data: Record<string, any>, company_id?: number) =>
-	apiPost('/payments', data, { company_id });
+export const createPayment = async (data: Record<string, any>, company_id?: number, bank_statement_line_id?: number) =>
+	apiPost('/payments', data, { company_id, bank_statement_line_id });
 
 export const getPayment = async (id: number) =>
 	apiGet(`/payments/${id}`);
@@ -318,6 +356,15 @@ export const getProfitLoss = async (params?: {
 export const getBalanceSheet = async (params?: { company_id?: number; as_of?: string; period_start?: string; currency?: string }) =>
 	apiGet('/reports/balance-sheet', params as any);
 
+export const getCashFlow = async (params: { company_id: number; date_from: string; date_to: string }) =>
+	apiGet('/reports/cash-flow', params as any);
+
+export const exportCashFlow = (params: { company_id: number; date_from: string; date_to: string }) => {
+	const qs = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
+	window.open(`${BASE}/reports/cash-flow/export?${qs}`, '_blank');
+};
+
 // ─── Invoice Link ───────────────────────────────────────────────────────────
 
 export const createInvoiceEntry = async (invoiceId: number, company_id?: number, data?: Record<string, any>) =>
@@ -334,11 +381,26 @@ export const getCategorizationRules = async (companyId: number) =>
 export const createCategorizationRule = async (companyId: number, data: Record<string, any>) =>
 	apiPost('/categorization-rules', data, { company_id: companyId });
 
+export const updateCategorizationRule = async (ruleId: number, data: Record<string, any>) =>
+	apiPatch(`/categorization-rules/${ruleId}`, data);
+
+export const approveCategorizationRule = async (ruleId: number) =>
+	apiPost(`/categorization-rules/${ruleId}/approve`);
+
+export const rejectCategorizationRule = async (ruleId: number) =>
+	apiPost(`/categorization-rules/${ruleId}/reject`);
+
 export const deleteCategorizationRule = async (ruleId: number) =>
 	apiDelete(`/categorization-rules/${ruleId}`);
 
-export const confirmInvoiceCategory = async (invoiceId: number, accountCode: string) =>
-	apiPost(`/invoices/${invoiceId}/confirm-category`, { account_code: accountCode });
+export const applyCategorizationRule = async (ruleId: number) =>
+	apiPost(`/categorization-rules/${ruleId}/apply`);
+
+export const confirmInvoiceCategory = async (invoiceId: number, accountCode: string, counterpartyAccountCode?: string) =>
+	apiPost(`/invoices/${invoiceId}/confirm-category`, {
+		account_code: accountCode,
+		...(counterpartyAccountCode ? { counterparty_account_code: counterpartyAccountCode } : {})
+	});
 
 // ── Audit Trail ───────────────────────────────────────────────────────
 
@@ -361,6 +423,35 @@ export const getARAging = async (params: { company_id: number; as_of?: string })
 	apiGet('/reports/ar-aging', params as any);
 
 // ─── Invoice List (for selectors) ──────────────────────────────────────────
+
+// ── Journal Templates ────────────────────────────────────────────────
+
+export const getJournalTemplates = async (companyId: number) =>
+	apiGet('/journal-templates', { company_id: companyId });
+
+export const createJournalTemplate = async (companyId: number, data: Record<string, any>) =>
+	apiPost('/journal-templates', data, { company_id: companyId });
+
+export const deleteJournalTemplate = async (id: number) =>
+	apiDelete(`/journal-templates/${id}`);
+
+export const createTemplateFromTransaction = async (transactionId: number, name: string) =>
+	apiPost('/journal-templates/from-transaction', undefined, { transaction_id: transactionId, name });
+
+// ── Bulk Operations ─────────────────────────────────────────────────
+
+export const bulkDeleteDrafts = async (companyId: number, transactionIds: number[]) =>
+	apiDelete(`/transactions/bulk-delete?company_id=${companyId}&transaction_ids=${transactionIds.join(',')}`);
+
+// ── Attachments ─────────────────────────────────────────────────────
+
+export const uploadAttachment = async (file: File): Promise<{ url: string; filename: string; size: number }> => {
+	const formData = new FormData();
+	formData.append('file', file);
+	const res = await fetch(`${BASE}/attachments/upload`, { method: 'POST', body: formData });
+	if (!res.ok) throw await res.json();
+	return res.json();
+};
 
 // ── Recurring Templates ───────────────────────────────────────────────
 
@@ -407,6 +498,27 @@ export const unmatchBankStatement = async (lineId: number) =>
 
 export const autoMatchBankStatements = async (bankAccountId: number) =>
 	apiPost(`/bank-accounts/${bankAccountId}/auto-match`);
+
+// ── Match Groups (M:N bank statement ↔ invoice matching) ────────────
+
+export const createMatchGroup = async (
+	companyId: number,
+	data: {
+		bsl_allocations: Array<{ bank_statement_line_id: number; allocated_amount: number }>;
+		transaction_allocations: Array<{ transaction_id: number; allocated_amount: number }>;
+		notes?: string;
+	}
+) => apiPost('/match-groups', data, { company_id: companyId });
+
+export const getMatchGroups = async (params: {
+	company_id: number;
+	bank_statement_line_id?: number;
+	invoice_id?: number;
+	status?: string;
+}) => apiGet('/match-groups', params as any);
+
+export const voidMatchGroup = async (matchGroupId: number) =>
+	apiPost(`/match-groups/${matchGroupId}/void`);
 
 export const getInvoiceList = async (params?: {
 	q?: string;
@@ -508,4 +620,39 @@ export const downloadExchangeRateTemplate = async () => {
 	a.download = 'exchange_rate_template.csv';
 	a.click();
 	URL.revokeObjectURL(a.href);
+};
+
+// ── Accounting AI (CPA-Qwen3) ──────────────────────────────────
+
+export const getAccountingAiStatus = async () => {
+	const res = await fetch(`${INVOICE_API_BASE_URL}/api/accounting/ai/status`);
+	if (!res.ok) throw new Error('Failed to get AI status');
+	return res.json();
+};
+
+export const aiCategorizeInvoice = async (invoiceId: number) => {
+	const res = await fetch(
+		`${INVOICE_API_BASE_URL}/api/accounting/invoices/${invoiceId}/ai-categorize`,
+		{ method: 'POST' }
+	);
+	if (!res.ok) throw new Error('AI categorization failed');
+	return res.json();
+};
+
+export const aiCategorizeAll = async (companyId: number) => {
+	const res = await fetch(
+		`${INVOICE_API_BASE_URL}/api/accounting/companies/${companyId}/ai-categorize-all`,
+		{ method: 'POST' }
+	);
+	if (!res.ok) throw new Error('Bulk AI categorization failed');
+	return res.json();
+};
+
+export const aiValidateTransaction = async (transactionId: number) => {
+	const res = await fetch(
+		`${INVOICE_API_BASE_URL}/api/accounting/transactions/${transactionId}/ai-validate`,
+		{ method: 'POST' }
+	);
+	if (!res.ok) throw new Error('AI validation failed');
+	return res.json();
 };

@@ -3,9 +3,11 @@
 	import { toast } from 'svelte-sonner';
 
 	import Modal from '$lib/components/common/Modal.svelte';
-	import { createTransaction, updateTransaction } from '$lib/apis/accounting';
+	import { createTransaction, updateTransaction, getJournalTemplates, createTemplateFromTransaction, uploadAttachment, getAccountingAiStatus, aiValidateTransaction, postTransaction, matchBankStatement } from '$lib/apis/accounting';
+	import { INVOICE_API_BASE_URL } from '$lib/constants';
 	import { K4MI_BASE_URL } from '$lib/constants';
 	import InvoiceSelector from '$lib/components/accounting/InvoiceSelector.svelte';
+	import AccountFormModal from '$lib/components/accounting/AccountFormModal.svelte';
 
 	const i18n = getContext('i18n');
 	const dispatch = createEventDispatcher();
@@ -14,9 +16,14 @@
 	export let transaction: any = null;
 	export let accounts: any[] = [];
 	export let companyId: number;
+	export let bankStatementLineId: number | null = null;  // when set, shows "Direct Match" option
 
 	// Determine read-only mode for posted/voided transactions
 	$: readOnly = transaction && (transaction.status === 'posted' || transaction.status === 'voided');
+
+	// Direct match: when creating from the Bank tab, auto-post + match to BSL
+	let directMatch = false;
+	$: if (bankStatementLineId) directMatch = true;
 
 	// Form state
 	let formData: {
@@ -28,7 +35,7 @@
 		invoice_id: number | null;
 	} = {
 		transaction_date: '',
-		transaction_type: 'journal',
+		transaction_type: 'others',
 		currency: 'USD',
 		reference: '',
 		description: '',
@@ -39,6 +46,75 @@
 	let invoiceK4miUrl = '';
 	let showInvoiceSelector = false;
 
+	// Journal templates
+	let journalTemplates: any[] = [];
+	let selectedTemplateId: number | null = null;
+	let savingTemplate = false;
+
+	async function loadTemplates() {
+		try {
+			const res = await getJournalTemplates(companyId);
+			journalTemplates = Array.isArray(res) ? res : [];
+		} catch { journalTemplates = []; }
+	}
+
+	function applyTemplate(templateId: number) {
+		const tpl = journalTemplates.find((t: any) => t.id === templateId);
+		if (!tpl) return;
+		formData.transaction_type = tpl.transaction_type || 'journal';
+		formData.currency = tpl.currency || 'USD';
+		formData.reference = tpl.reference_prefix || '';
+		formData.description = tpl.description || '';
+		lines = (tpl.lines_template || []).map((l: any) => {
+			const acct = accounts.find((a: any) => a.code === l.account_code);
+			return {
+				account_id: acct?.id ?? null,
+				debit: parseFloat(l.debit) || null,
+				credit: parseFloat(l.credit) || null,
+				description: l.description || ''
+			};
+		});
+		if (lines.length < 2) {
+			while (lines.length < 2) lines.push({ account_id: null, debit: null, credit: null, description: '' });
+		}
+		selectedTemplateId = null;
+	}
+
+	async function saveAsTemplate() {
+		if (!transaction?.id) return;
+		const name = prompt('Template name:');
+		if (!name) return;
+		savingTemplate = true;
+		try {
+			await createTemplateFromTransaction(transaction.id, name);
+			toast.success($i18n.t('Template saved'));
+			await loadTemplates();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+		savingTemplate = false;
+	}
+
+	// Attachments
+	let attachmentUrls: string[] = [];
+	let uploading = false;
+	let attachmentInput: HTMLInputElement;
+
+	async function handleAttachmentUpload() {
+		if (!attachmentInput?.files?.length) return;
+		uploading = true;
+		try {
+			for (const file of attachmentInput.files) {
+				const result = await uploadAttachment(file);
+				attachmentUrls = [...attachmentUrls, result.url];
+			}
+			attachmentInput.value = '';
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+		uploading = false;
+	}
+
+	function removeAttachment(index: number) {
+		attachmentUrls = attachmentUrls.filter((_, i) => i !== index);
+	}
+
 	let lines: Array<{
 		account_id: number | null;
 		debit: number | null;
@@ -48,9 +124,69 @@
 
 	let saving = false;
 
+	// Account search per line
+	let accountSearchIdx: number | null = null; // which line's dropdown is open
+	let accountSearchQuery = '';
+
+	const openAccountSearch = (idx: number) => {
+		accountSearchIdx = idx;
+		const acct = accounts.find((a: any) => a.id === lines[idx]?.account_id);
+		accountSearchQuery = acct ? `${acct.code} - ${acct.name}` : '';
+	};
+
+	const selectAccount = (idx: number, accountId: number) => {
+		lines[idx].account_id = accountId;
+		lines = lines;
+		accountSearchIdx = null;
+		accountSearchQuery = '';
+	};
+
+	const clearAccount = (idx: number) => {
+		lines[idx].account_id = null;
+		lines = lines;
+		accountSearchQuery = '';
+	};
+
+	const getAccountLabel = (accountId: number | null): string => {
+		if (!accountId) return '';
+		const acct = accounts.find((a: any) => a.id === accountId);
+		return acct ? `${acct.code} - ${acct.name}` : `#${accountId}`;
+	};
+
+	$: filteredAccounts = accounts.filter((a: any) => {
+		if (!accountSearchQuery) return true;
+		const q = accountSearchQuery.toLowerCase();
+		return (a.code ?? '').toLowerCase().includes(q) || (a.name ?? '').toLowerCase().includes(q);
+	});
+
+	// Inline account creation
+	let showCreateAccount = false;
+	let createAccountForLineIdx: number | null = null;
+
+	const openCreateAccount = (idx: number) => {
+		createAccountForLineIdx = idx;
+		accountSearchIdx = null;
+		showCreateAccount = true;
+	};
+
+	const handleAccountCreated = (e: CustomEvent) => {
+		const newAccount = e.detail;
+		if (newAccount?.id) {
+			// Add to local accounts list and select it
+			accounts = [...accounts, newAccount];
+			if (createAccountForLineIdx !== null) {
+				lines[createAccountForLineIdx].account_id = newAccount.id;
+				lines = lines;
+			}
+		}
+		showCreateAccount = false;
+		createAccountForLineIdx = null;
+	};
+
 	// Reset form when modal opens or transaction changes
 	$: if (show) {
 		resetForm();
+		loadTemplates();
 	}
 
 	function resetForm() {
@@ -64,6 +200,7 @@
 				invoice_id: transaction.invoice_id ?? null
 			};
 			invoiceLabel = transaction.invoice_id ? `#${transaction.invoice_id}` : '';
+			attachmentUrls = transaction.attachment_urls ?? [];
 			lines =
 				transaction.lines?.map((l: any) => ({
 					account_id: l.account_id ?? null,
@@ -74,13 +211,14 @@
 		} else {
 			formData = {
 				transaction_date: new Date().toISOString().slice(0, 10),
-				transaction_type: 'journal',
+				transaction_type: 'others',
 				currency: 'USD',
 				reference: '',
 				description: '',
 				invoice_id: null
 			};
 			invoiceLabel = '';
+			attachmentUrls = [];
 			lines = [
 				{ account_id: null, debit: null, credit: null, description: '' },
 				{ account_id: null, debit: null, credit: null, description: '' }
@@ -145,12 +283,46 @@
 		lines = lines.filter((_, i) => i !== index);
 	}
 
+	// AI validation
+	let aiAvailable = false;
+	let validating = false;
+	let validationResult: { is_valid: boolean; issues: string[]; warnings: string[]; suggestions: string[] } | null = null;
+
+	// Check AI status on mount
+	import { onMount } from 'svelte';
+	onMount(() => {
+		getAccountingAiStatus()
+			.then((s) => (aiAvailable = s.available))
+			.catch(() => {});
+	});
+
+	async function handleValidate() {
+		if (!transaction?.id) {
+			toast.info('Save the entry first to validate');
+			return;
+		}
+		validating = true;
+		try {
+			validationResult = await aiValidateTransaction(transaction.id);
+			if (validationResult.is_valid) {
+				toast.success('Entry looks good!');
+			} else {
+				toast.warning(`Found ${validationResult.issues.length} issue(s)`);
+			}
+		} catch {
+			toast.error('AI validation failed');
+		} finally {
+			validating = false;
+		}
+	}
+
 	async function handleSubmit() {
 		if (!canSubmit) return;
 		saving = true;
 
 		const payload: Record<string, any> = {
 			...formData,
+			attachment_urls: attachmentUrls.length > 0 ? attachmentUrls : undefined,
 			lines: lines.map((l) => ({
 				account_id: l.account_id,
 				debit: l.debit ?? 0,
@@ -171,7 +343,16 @@
 				toast.success($i18n.t('Transaction updated'));
 			} else {
 				result = await createTransaction(payload, companyId);
-				toast.success($i18n.t('Transaction created'));
+				const txnId = result?.id ?? result?.transaction?.id;
+
+				// Direct match: post the entry and match it to the BSL
+				if (directMatch && bankStatementLineId && txnId) {
+					await postTransaction(txnId);
+					await matchBankStatement(bankStatementLineId, txnId);
+					toast.success($i18n.t('Entry created, posted, and matched'));
+				} else {
+					toast.success($i18n.t('Transaction created'));
+				}
 			}
 			dispatch('save', result);
 			show = false;
@@ -185,6 +366,7 @@
 </script>
 
 <InvoiceSelector bind:show={showInvoiceSelector} on:select={handleInvoiceSelect} />
+<AccountFormModal bind:show={showCreateAccount} {accounts} {companyId} on:save={handleAccountCreated} />
 
 <Modal bind:show size="lg">
 	<div class="px-6 py-5">
@@ -256,6 +438,37 @@
 			</div>
 		</div>
 
+		<!-- Template Selector (only when creating new) -->
+		{#if !transaction?.id && journalTemplates.length > 0}
+			<div class="flex items-center gap-2 mb-3">
+				<label class="text-xs font-medium text-gray-500 dark:text-gray-400 whitespace-nowrap">
+					{$i18n.t('From Template')}
+				</label>
+				<select
+					class="flex-1 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent dark:bg-gray-850 px-3 py-1.5 outline-hidden focus:border-blue-500 dark:text-gray-200"
+					bind:value={selectedTemplateId}
+					on:change={() => { if (selectedTemplateId) applyTemplate(selectedTemplateId); }}
+				>
+					<option value={null}>{$i18n.t('Select a template...')}</option>
+					{#each journalTemplates as tpl}
+						<option value={tpl.id}>{tpl.name}</option>
+					{/each}
+				</select>
+			</div>
+		{/if}
+
+		<!-- Save as Template (only for existing transactions) -->
+		{#if transaction?.id && !savingTemplate}
+			<div class="flex justify-end mb-2">
+				<button
+					class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition"
+					on:click={saveAsTemplate}
+				>
+					{$i18n.t('Save as Template')}
+				</button>
+			</div>
+		{/if}
+
 		<!-- Form Fields -->
 		<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
 			<!-- Date -->
@@ -281,10 +494,12 @@
 					bind:value={formData.transaction_type}
 					disabled={readOnly}
 				>
-					<option value="journal">{$i18n.t('Journal')}</option>
 					<option value="invoice">{$i18n.t('Invoice')}</option>
 					<option value="bill">{$i18n.t('Bill')}</option>
-					<option value="payment">{$i18n.t('Payment')}</option>
+					<option value="payment_in">{$i18n.t('Payment In')}</option>
+					<option value="payment_out">{$i18n.t('Payment Out')}</option>
+					<option value="others">{$i18n.t('Others')}</option>
+					<option value="adjustment">{$i18n.t('Adjustment')}</option>
 				</select>
 			</div>
 
@@ -364,20 +579,56 @@
 					<tbody>
 						{#each lines as line, idx}
 							<tr class="border-b border-gray-100 dark:border-gray-800">
-								<!-- Account select -->
-								<td class="px-2 py-1.5">
-									<select
-										class="w-full text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent dark:bg-gray-850 px-2 py-1.5 outline-hidden focus:border-blue-500 dark:text-gray-200 disabled:opacity-60"
-										bind:value={line.account_id}
-										disabled={readOnly}
-									>
-										<option value={null}>-- {$i18n.t('Select account')} --</option>
-										{#each accounts as account}
-											<option value={account.id}>
-												{account.code} - {account.name}
-											</option>
-										{/each}
-									</select>
+								<!-- Account searchable select -->
+								<td class="px-2 py-1.5 relative">
+									{#if accountSearchIdx === idx && !readOnly}
+										<!-- Search input + dropdown -->
+										<input
+											type="text"
+											class="w-full text-xs rounded-lg border border-blue-400 dark:border-blue-600 bg-white dark:bg-gray-850 px-2 py-1.5 outline-hidden dark:text-gray-200"
+											placeholder={$i18n.t('Search accounts...')}
+											bind:value={accountSearchQuery}
+											on:blur={() => { setTimeout(() => { accountSearchIdx = null; }, 200); }}
+											autofocus
+										/>
+										<div class="absolute z-50 left-2 right-2 mt-0.5 max-h-40 overflow-y-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg">
+											{#each filteredAccounts.slice(0, 30) as account}
+												<button
+													type="button"
+													class="w-full text-left px-2.5 py-1.5 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/20 transition border-b border-gray-50 dark:border-gray-800 last:border-b-0"
+													on:mousedown|preventDefault={() => selectAccount(idx, account.id)}
+												>
+													<span class="font-mono font-medium">{account.code}</span>
+													<span class="text-gray-500 dark:text-gray-400 ml-1">{account.name}</span>
+												</button>
+											{/each}
+											{#if filteredAccounts.length === 0}
+												<div class="px-2.5 py-2 text-xs text-gray-400 italic">{$i18n.t('No accounts found')}</div>
+											{/if}
+											<button
+												type="button"
+												class="w-full text-left px-2.5 py-1.5 text-xs font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition border-t border-gray-200 dark:border-gray-700 flex items-center gap-1"
+												on:mousedown|preventDefault={() => openCreateAccount(idx)}
+											>
+												<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+												{$i18n.t('Create new account')}
+											</button>
+										</div>
+									{:else}
+										<!-- Display selected account as clickable button -->
+										<button
+											type="button"
+											class="w-full text-left text-xs rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent dark:bg-gray-850 px-2 py-1.5 outline-hidden dark:text-gray-200 disabled:opacity-60 hover:border-blue-400 dark:hover:border-blue-600 transition truncate"
+											disabled={readOnly}
+											on:click={() => openAccountSearch(idx)}
+										>
+											{#if line.account_id}
+												{getAccountLabel(line.account_id)}
+											{:else}
+												<span class="text-gray-400">-- {$i18n.t('Select account')} --</span>
+											{/if}
+										</button>
+									{/if}
 								</td>
 
 								<!-- Debit -->
@@ -485,8 +736,68 @@
 			</div>
 		</div>
 
+		<!-- Attachments -->
+		<div class="mt-3">
+			<div class="flex items-center justify-between mb-1.5">
+				<label class="text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Attachments')}</label>
+				{#if !readOnly}
+					<input
+						bind:this={attachmentInput}
+						type="file"
+						multiple
+						class="hidden"
+						on:change={handleAttachmentUpload}
+					/>
+					<button
+						class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition flex items-center gap-1"
+						on:click={() => attachmentInput?.click()}
+						disabled={uploading}
+					>
+						{#if uploading}
+							{$i18n.t('Uploading...')}
+						{:else}
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" /></svg>
+							{$i18n.t('Attach File')}
+						{/if}
+					</button>
+				{/if}
+			</div>
+			{#if attachmentUrls.length > 0}
+				<div class="space-y-1">
+					{#each attachmentUrls as url, i}
+						<div class="flex items-center gap-2 text-xs bg-gray-50 dark:bg-gray-850 rounded-lg px-3 py-1.5">
+							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5 text-gray-400"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>
+							<a
+								href="{INVOICE_API_BASE_URL}{url}"
+								target="_blank"
+								rel="noopener"
+								class="text-blue-600 dark:text-blue-400 hover:underline truncate flex-1"
+							>
+								{url.split('/').pop()}
+							</a>
+							{#if !readOnly}
+								<button class="text-red-500 hover:text-red-700 transition" on:click={() => removeAttachment(i)} title={$i18n.t('Remove')}>
+									<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+								</button>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{:else}
+				<div class="text-[10px] text-gray-400 dark:text-gray-500 italic">{$i18n.t('No attachments')}</div>
+			{/if}
+		</div>
+
+		<!-- Direct Match option (only when creating from Bank tab) -->
+		{#if bankStatementLineId && !transaction?.id}
+			<label class="flex items-center gap-2 pt-3 text-xs text-gray-600 dark:text-gray-400 cursor-pointer border-t border-gray-100 dark:border-gray-800">
+				<input type="checkbox" bind:checked={directMatch} class="rounded" />
+				{$i18n.t('Direct match — post entry and match to bank statement line')}
+			</label>
+		{/if}
+
 		<!-- Footer -->
-		<div class="flex items-center justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
+		<div class="flex items-center justify-end gap-2 pt-3" class:border-t={!bankStatementLineId || transaction?.id} class:border-gray-100={!bankStatementLineId} class:dark:border-gray-800={!bankStatementLineId}>
 			<button
 				class="text-sm px-4 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white font-medium transition"
 				on:click={() => (show = false)}
@@ -495,6 +806,15 @@
 			</button>
 
 			{#if !readOnly}
+				{#if aiAvailable && transaction?.id}
+					<button
+						class="text-sm px-3 py-2 rounded-xl border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition disabled:opacity-50"
+						disabled={validating}
+						on:click={handleValidate}
+					>
+						{validating ? $i18n.t('Validating...') : $i18n.t('AI Validate')}
+					</button>
+				{/if}
 				<button
 					class="text-sm px-4 py-2 rounded-xl bg-gray-900 hover:bg-gray-850 text-gray-100 dark:bg-gray-100 dark:hover:bg-white dark:text-gray-800 font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
 					disabled={!canSubmit}
@@ -510,5 +830,25 @@
 				</button>
 			{/if}
 		</div>
+
+		<!-- AI Validation Results -->
+		{#if validationResult}
+			<div class="px-5 pb-4 -mt-2">
+				<div class="text-xs rounded-lg p-3 space-y-1.5 {validationResult.is_valid ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'}">
+					<div class="font-medium {validationResult.is_valid ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}">
+						{validationResult.is_valid ? $i18n.t('Entry is valid') : $i18n.t('Issues found')}
+					</div>
+					{#each validationResult.issues as issue}
+						<div class="text-red-600 dark:text-red-400">- {issue}</div>
+					{/each}
+					{#each validationResult.warnings as warning}
+						<div class="text-yellow-600 dark:text-yellow-400">- {warning}</div>
+					{/each}
+					{#each validationResult.suggestions as suggestion}
+						<div class="text-blue-600 dark:text-blue-400">- {suggestion}</div>
+					{/each}
+				</div>
+			</div>
+		{/if}
 	</div>
 </Modal>

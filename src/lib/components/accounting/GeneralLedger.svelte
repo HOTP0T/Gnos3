@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { getGeneralLedger, getFullGeneralLedger, getAccounts } from '$lib/apis/accounting';
+	import { getGeneralLedger, getFullGeneralLedger, getAccounts, exportGeneralLedger } from '$lib/apis/accounting';
 	import { K4MI_BASE_URL } from '$lib/constants';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -9,6 +9,7 @@
 	export let companyId: number;
 
 	let loading = false;
+	let loaded = false;
 	let mode: 'journal' | 'account' = 'journal';
 
 	let dateFrom = '';
@@ -64,6 +65,7 @@
 			}
 		} catch (err) { toast.error(`${err}`); }
 		loading = false;
+		loaded = true;
 	};
 
 	const fmt = (v: any): string => {
@@ -116,11 +118,20 @@
 			<input type="date" bind:value={dateTo} class="text-sm rounded-lg px-3 py-1.5 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden" />
 		</div>
 		<button class="px-4 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition" on:click={() => { journalPage = 0; accountPage = 0; load(); }}>{$i18n.t('Load')}</button>
+		{#if (mode === 'journal' && journalEntries.length > 0) || (mode === 'account' && accountData)}
+			<button
+				class="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1.5"
+				on:click={() => exportGeneralLedger({ company_id: companyId, date_from: dateFrom || undefined, date_to: dateTo || undefined })}
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+				{$i18n.t('Export Excel')}
+			</button>
+		{/if}
 	</div>
 
 	{#if loading}
 		<div class="flex justify-center my-10"><Spinner className="size-5" /></div>
-	{:else if mode === 'journal' && journalEntries.length > 0}
+	{:else if mode === 'journal' && loaded}
 		<!-- Journal View matching sample: Period | Reference | Description | Account Code | Account Name | Currency | Exch Rate | Orig Amount | Debit | Credit -->
 		<div class="overflow-x-auto bg-white dark:bg-gray-900 rounded-xl border border-gray-100/30 dark:border-gray-850/30">
 			<table class="w-full text-xs text-left text-gray-700 dark:text-gray-300 whitespace-nowrap">
@@ -140,23 +151,29 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each journalEntries as entry, entryIdx}
-						{#each entry.lines as line, lineIdx}
-							<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30 {lineIdx === 0 && entryIdx > 0 ? 'border-t-2 border-gray-200 dark:border-gray-700' : ''}">
-								<td class="px-2 py-1.5 font-mono text-gray-400 text-[10px]">{lineIdx === 0 ? entry.transaction_id : ''}</td>
-							<td class="px-2 py-1.5 font-mono">{lineIdx === 0 ? entry.period : ''}</td>
-								<td class="px-2 py-1.5">{#if lineIdx === 0 && entry.k4mi_document_id}<a href="{K4MI_BASE_URL}/documents/{entry.k4mi_document_id}/details" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline" title={$i18n.t('Open in K4mi')}>{entry.reference ?? ''} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline mb-0.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg></a>{:else if lineIdx === 0}{entry.reference ?? ''}{/if}</td>
-								<td class="px-2 py-1.5 max-w-[200px] truncate">{lineIdx === 0 ? (entry.description ?? '') : ''}</td>
-								<td class="px-2 py-1.5 font-mono">{line.account_code}</td>
-								<td class="px-2 py-1.5">{line.account_name}</td>
-								<td class="px-2 py-1.5">{lineIdx === 0 ? entry.currency : ''}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{lineIdx === 0 ? fmtRate(entry.exchange_rate) : ''}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{origAmount(line)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(line.debit)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(line.credit)}</td>
-							</tr>
+					{#if journalEntries.length === 0}
+						<tr>
+							<td colspan="11" class="px-4 py-8 text-center text-sm text-gray-400 italic">{$i18n.t('No journal entries found.')}</td>
+						</tr>
+					{:else}
+						{#each journalEntries as entry, entryIdx}
+							{#each entry.lines as line, lineIdx}
+								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30 {lineIdx === 0 && entryIdx > 0 ? 'border-t-2 border-gray-200 dark:border-gray-700' : ''}">
+									<td class="px-2 py-1.5 font-mono text-[10px]" title="ID: {entry.transaction_id}">{lineIdx === 0 ? (entry.entry_number || entry.transaction_id || '') : ''}</td>
+								<td class="px-2 py-1.5 font-mono">{lineIdx === 0 ? entry.period : ''}</td>
+									<td class="px-2 py-1.5">{#if lineIdx === 0 && entry.k4mi_document_id}<a href="{K4MI_BASE_URL}/documents/{entry.k4mi_document_id}/details" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline" title={$i18n.t('Open in K4mi')}>{entry.reference ?? ''} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline mb-0.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg></a>{:else if lineIdx === 0}{entry.reference ?? ''}{/if}</td>
+									<td class="px-2 py-1.5 max-w-[200px] truncate">{lineIdx === 0 ? (entry.description ?? '') : ''}</td>
+									<td class="px-2 py-1.5 font-mono">{line.account_code}</td>
+									<td class="px-2 py-1.5">{line.account_name}</td>
+									<td class="px-2 py-1.5">{lineIdx === 0 ? entry.currency : ''}</td>
+									<td class="px-2 py-1.5 text-right font-mono">{lineIdx === 0 ? fmtRate(entry.exchange_rate) : ''}</td>
+									<td class="px-2 py-1.5 text-right font-mono">{origAmount(line)}</td>
+									<td class="px-2 py-1.5 text-right font-mono">{fmt(line.debit)}</td>
+									<td class="px-2 py-1.5 text-right font-mono">{fmt(line.credit)}</td>
+								</tr>
+							{/each}
 						{/each}
-					{/each}
+					{/if}
 				</tbody>
 				<tfoot class="font-medium bg-gray-50 dark:bg-gray-850/50 text-gray-800 dark:text-gray-200">
 					<tr class="border-t-2 border-gray-200 dark:border-gray-700">
@@ -177,8 +194,10 @@
 		{/if}
 
 	{:else if mode === 'account' && accountData}
+		{@const hasSubAccounts = accountData.entries.some((e) => e.account_code)}
 		<div class="text-sm font-medium dark:text-gray-200">
 			{accountData.account_code} — {accountData.account_name}
+			{#if hasSubAccounts}<span class="text-[10px] text-gray-400 ml-1">({$i18n.t('incl. sub-accounts')})</span>{/if}
 			<span class="text-xs text-gray-500 ml-2">{$i18n.t('Opening')}: {fmt(accountData.opening_balance)}</span>
 		</div>
 
@@ -187,6 +206,7 @@
 				<thead class="text-[10px] uppercase bg-gray-50 dark:bg-gray-850/50 text-gray-600 dark:text-gray-400">
 					<tr>
 						<th class="px-2 py-2">{$i18n.t('Date')}</th>
+						{#if hasSubAccounts}<th class="px-2 py-2">{$i18n.t('Account')}</th>{/if}
 						<th class="px-2 py-2">{$i18n.t('Reference')}</th>
 						<th class="px-2 py-2">{$i18n.t('Description')}</th>
 						<th class="px-2 py-2 text-right">{$i18n.t('Debit')}</th>
@@ -198,6 +218,14 @@
 					{#each accountData.entries as entry}
 						<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 							<td class="px-2 py-1.5">{entry.transaction_date}</td>
+							{#if hasSubAccounts}
+								<td class="px-2 py-1.5">
+									{#if entry.account_code}
+										<span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">{entry.account_code}</span>
+										<span class="text-[10px] text-gray-400 ml-0.5">{entry.account_name ?? ''}</span>
+									{/if}
+								</td>
+							{/if}
 							<td class="px-2 py-1.5">{#if entry.k4mi_document_id}<a href="{K4MI_BASE_URL}/documents/{entry.k4mi_document_id}/details" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline" title={$i18n.t('Open in K4mi')}>{entry.reference ?? ''} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline mb-0.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg></a>{:else}{entry.reference ?? ''}{/if}</td>
 							<td class="px-2 py-1.5">{entry.description ?? ''}</td>
 							<td class="px-2 py-1.5 text-right font-mono">{fmt(entry.debit)}</td>
@@ -208,7 +236,7 @@
 				</tbody>
 				<tfoot class="font-medium bg-gray-50 dark:bg-gray-850/50 text-gray-800 dark:text-gray-200">
 					<tr class="border-t-2 border-gray-200 dark:border-gray-700">
-						<td class="px-2 py-2" colspan="5">{$i18n.t('Closing Balance')}</td>
+						<td class="px-2 py-2" colspan="{hasSubAccounts ? 6 : 5}">{$i18n.t('Closing Balance')}</td>
 						<td class="px-2 py-2 text-right font-mono">{fmt(accountData.closing_balance)}</td>
 					</tr>
 				</tfoot>

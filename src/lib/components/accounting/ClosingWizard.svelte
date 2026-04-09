@@ -6,7 +6,11 @@
 		getClosingChecklist,
 		yearEndClose,
 		generateDepreciation,
-		getPeriods
+		getPeriods,
+		bulkPostTransactions,
+		autoMatchBankStatements,
+		getBankAccounts,
+		closePeriod
 	} from '$lib/apis/accounting';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -110,17 +114,43 @@
 	// ─── Action handlers ────────────────────────────────────────────────────────
 
 	const handleCheckAction = async (check: any) => {
-		if (check.action === 'generate_depreciation') {
-			const opt = monthOptions.find((o) => o.value === selectedMonth);
-			if (!opt) return;
+		const opt = monthOptions.find((o) => o.value === selectedMonth);
+		if (!opt) return;
+
+		if (check.action === 'bulk_post_drafts' || check.step === 'draft_entries') {
+			try {
+				const result = await bulkPostTransactions({
+					company_id: companyId,
+					period_start: opt.from,
+					period_end: opt.to
+				});
+				toast.success(`${result?.posted ?? 0} ${$i18n.t('entries posted')}${result?.skipped ? `, ${result.skipped} ${$i18n.t('skipped')}` : ''}`);
+				await handleRunChecklist();
+			} catch (err: any) {
+				toast.error(err?.detail ?? `${err}`);
+			}
+		} else if (check.action === 'auto_reconcile' || check.step === 'bank_reconciliation') {
+			try {
+				const banks = await getBankAccounts(companyId);
+				const bankList = banks?.accounts ?? banks ?? [];
+				let totalMatched = 0;
+				for (const ba of bankList) {
+					const result = await autoMatchBankStatements(ba.id);
+					totalMatched += result?.matched ?? 0;
+				}
+				toast.success(`${totalMatched} ${$i18n.t('bank lines matched')}`);
+				await handleRunChecklist();
+			} catch (err: any) {
+				toast.error(err?.detail ?? `${err}`);
+			}
+		} else if (check.action === 'generate_depreciation') {
 			try {
 				const result = await generateDepreciation(companyId, opt.to);
 				const count = result?.entries_created ?? result?.count ?? 0;
 				toast.success(`${count} ${$i18n.t('depreciation entries created as Draft')}`);
 				await handleRunChecklist();
 			} catch (err: any) {
-				const msg = err?.detail ?? err?.message ?? String(err);
-				toast.error($i18n.t('Failed to generate depreciation') + ': ' + msg);
+				toast.error(err?.detail ?? `${err}`);
 			}
 		} else if (check.action === 'generate_tax_entry') {
 			toast.info($i18n.t('Please use the Tax Declaration tab to generate tax entries'));
@@ -130,8 +160,19 @@
 	// ─── Close Period ───────────────────────────────────────────────────────────
 
 	const handleClosePeriod = async () => {
-		// Close is handled via the Periods management; here we just show a message
-		toast.info($i18n.t('Use the Accounting Periods section in Settings to close the period'));
+		if (!checklist?.period_id) {
+			toast.info($i18n.t('Use the Accounting Periods section in Settings to close the period'));
+			return;
+		}
+		closing = true;
+		try {
+			await closePeriod(checklist.period_id);
+			toast.success($i18n.t('Period closed'));
+			await handleRunChecklist();
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
+		}
+		closing = false;
 	};
 
 	// ─── Year-End Close ─────────────────────────────────────────────────────────

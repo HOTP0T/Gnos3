@@ -15,11 +15,12 @@
 		getExchangeRates,
 		editBankStatementLine,
 		getTransactions,
-		createTransaction,
-		postTransaction,
-		downloadBankStatementTemplate
+		downloadBankStatementTemplate,
+		createMatchGroup
 	} from '$lib/apis/accounting';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import PaymentFormModal from '$lib/components/accounting/PaymentFormModal.svelte';
+	import TransactionFormModal from '$lib/components/accounting/TransactionFormModal.svelte';
 
 	const i18n = getContext('i18n');
 	export let companyId: number;
@@ -38,6 +39,10 @@
 
 	// Filter
 	let statusFilter = '';
+	let searchQuery = '';
+	let dateFrom = '';
+	let dateTo = '';
+	let directionFilter: '' | 'credit' | 'debit' = '';
 
 	// Import modal
 	let showImportModal = false;
@@ -52,23 +57,62 @@
 	// Auto-reconcile loading
 	let autoReconciling = false;
 
-	// Match popover
+	// Expandable matched details row
+	let expandedLineId: number | null = null;
+
+	// Match popover — unified entry list with optional multi-select
 	let matchingLineId: number | null = null;
 	let matchSearchQuery = '';
 	let matchCandidates: any[] = [];
 	let matchLoading = false;
+	let matchMultiSelect = false; // toggle for multi-select mode
+	let matchSelectedIds: Set<number> = new Set(); // selected transaction IDs for multi-match
+	let matchCreating = false;
+
+	// Multi-BSL selection for N:1 matching
+	let selectedBslIds: Set<number> = new Set();
+	let showMultiMatchModal = false;
+	let multiMatchInvoices: any[] = [];
+	let multiMatchAllocations: Map<number, number> = new Map();
+	let multiMatchLoading = false;
+	let multiMatchCreating = false;
 
 	// Create entry modal
 	let showCreateEntryModal = false;
-	let createEntryLine: any = null;
-	let createEntryDebitAccountId: number | null = null;
-	let createEntryCreditAccountId: number | null = null;
-	let createEntryDescription = '';
-	let createEntryDate = '';
-	let createEntryAmount: number = 0;
-	let creatingEntry = false;
+	let createEntryBslId: number | null = null;
 
-	const CURRENCIES = ['EUR', 'USD', 'GBP', 'CNY', 'JPY', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'SEK', 'NOK', 'DKK', 'NZD', 'KRW', 'INR', 'BRL', 'ZAR', 'MXN', 'PLN', 'CZK', 'TRY', 'THB', 'TWD', 'MAD', 'XOF'];
+	// Payment modal state
+	let showPaymentModal = false;
+	let paymentPrefill: any = null;
+	let payingLineId: number | null = null;
+
+	const handlePay = (line: any) => {
+		const amount = Math.abs(parseFloat(line.amount) || 0);
+		const isInbound = parseFloat(line.amount) > 0;
+		payingLineId = line.id;
+		paymentPrefill = {
+			payment_date: line.transaction_date || new Date().toISOString().slice(0, 10),
+			amount,
+			currency: selectedBankCurrency || 'EUR',
+			direction: isInbound ? 'inbound' : 'outbound',
+			method: 'bank_transfer',
+			payer: isInbound ? (line.description || '') : '',
+			payee: isInbound ? '' : (line.description || ''),
+			reference: line.reference || line.description || '',
+			invoice_id: line.matched_txn_invoice_id || null,
+			_bank_statement_line_id: line.id
+		};
+		showPaymentModal = true;
+	};
+
+	const handlePaymentSaved = async () => {
+		toast.success($i18n.t('Payment recorded'));
+		showPaymentModal = false;
+		payingLineId = null;
+		await loadStatements();
+	};
+
+	const CURRENCIES =['EUR', 'USD', 'GBP', 'CNY', 'JPY', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'SEK', 'NOK', 'DKK', 'NZD', 'KRW', 'INR', 'BRL', 'ZAR', 'MXN', 'PLN', 'CZK', 'TRY', 'THB', 'TWD', 'MAD', 'XOF'];
 
 	// Display currency conversion
 	let displayCurrency = '';
@@ -117,7 +161,7 @@
 				selectedBankId = bankAccounts[0].id;
 				await loadStatements();
 			}
-		} catch (err) { toast.error(`${err}`); }
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 		loading = false;
 	};
 
@@ -128,7 +172,7 @@
 			const params: Record<string, any> = {};
 			if (statusFilter) params.status = statusFilter;
 			statements = await getBankStatements(selectedBankId, params) ?? [];
-		} catch (err) { toast.error(`${err}`); }
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 		statementsLoading = false;
 	};
 
@@ -144,7 +188,7 @@
 			showNewBank = false;
 			newBankName = '';
 			await load();
-		} catch (err) { toast.error(`${err}`); }
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 	};
 
 	// Import modal handlers
@@ -165,7 +209,7 @@
 			toast.success($i18n.t(`Imported ${res.imported} lines`));
 			showImportModal = false;
 			await loadStatements();
-		} catch (err) { toast.error(`${err}`); }
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 		importing = false;
 	};
 
@@ -177,15 +221,20 @@
 			const res = await autoMatchBankStatements(selectedBankId);
 			toast.success($i18n.t(`Matched ${res.matched} lines, ${res.remaining} remaining`));
 			await loadStatements();
-		} catch (err) { toast.error(`${err}`); }
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 		autoReconciling = false;
 	};
 
 	const handleUnmatch = async (lineId: number) => {
+		const line = statements.find((s: any) => s.id === lineId);
+		if (line?.payment_id) {
+			const ok = confirm($i18n.t('This line has a recorded payment. Unmatching will keep the payment but break the reconciliation link. Continue?'));
+			if (!ok) return;
+		}
 		try {
 			await unmatchBankStatement(lineId);
 			await loadStatements();
-		} catch (err) { toast.error(`${err}`); }
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 	};
 
 	// Reference inline editing
@@ -203,7 +252,7 @@
 				await editBankStatementLine(editingRefLineId, { reference: editRefValue });
 				toast.success($i18n.t('Reference updated'));
 				await loadStatements();
-			} catch (err) { toast.error(`${err}`); }
+			} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 		}
 		editingRefLineId = null;
 	};
@@ -213,51 +262,89 @@
 		if (e.key === 'Enter') saveEditRef();
 	};
 
-	// Manual match popover
+	// Manual match popover — unified entry list with optional multi-select
 	const openMatchPopover = async (line: any) => {
 		matchingLineId = line.id;
 		matchSearchQuery = '';
+		matchMultiSelect = false;
+		matchSelectedIds = new Set();
 		matchLoading = true;
+		matchCandidates = [];
 		try {
-			const res = await getTransactions({
-				company_id: companyId,
-				status: 'posted',
-				limit: 100
-			});
+			const res = await getTransactions({ company_id: companyId, status: 'posted', limit: 100 });
 			const all = res?.transactions ?? res ?? [];
 			const txns = Array.isArray(all) ? all : [];
 
-			// Find the bank line we're matching
+			// Sum allocated amounts per transaction across all BSLs' match groups
+			const txnAllocated = new Map<number, number>();
+			for (const s of statements) {
+				if (s.match_groups) {
+					for (const mg of s.match_groups) {
+						if (mg.transactions) {
+							for (const t of mg.transactions) {
+								txnAllocated.set(t.transaction_id, (txnAllocated.get(t.transaction_id) || 0) + parseFloat(t.allocated_amount || 0));
+							}
+						}
+					}
+				}
+			}
+
 			const bankLine = statements.find(s => s.id === matchingLineId);
 			const bankAmount = bankLine ? Math.abs(parseFloat(bankLine.amount)) : 0;
+			const bankAmountRaw = bankLine ? parseFloat(bankLine.amount) : 0;
+			const isCredit = bankAmountRaw > 0;
+			const bankDesc = (bankLine?.description ?? '').toLowerCase();
+			const bankRef = (bankLine?.reference ?? '').toLowerCase();
 
-			// Sort candidates: exact amount matches first, then by date proximity
 			matchCandidates = txns
-				.filter((t: any) => {
-					// Only show transactions that touch account 512 (bank)
-					const has512 = (t.lines ?? []).some((l: any) => l.account_code === '512');
-					return has512;
-				})
 				.map((t: any) => {
-					const line512 = (t.lines ?? []).find((l: any) => l.account_code === '512');
-					const glAmount = line512 ? Math.abs(parseFloat(line512.debit || 0) - parseFloat(line512.credit || 0)) : 0;
-					const amountMatch = bankAmount > 0 && Math.abs(glAmount - bankAmount) < 0.02;
-					return { ...t, _glAmount: glAmount, _amountMatch: amountMatch };
+					const totalDebit = (t.lines ?? []).reduce((sum: number, l: any) => sum + parseFloat(l.debit || 0), 0);
+					const allocated = txnAllocated.get(t.id) || 0;
+					const remaining = totalDebit - allocated;
+					const amountMatch = bankAmount > 0 && Math.abs(remaining - bankAmount) < 0.02;
+					const txnType = (t.transaction_type ?? '').toLowerCase();
+					const directionMatch = isCredit
+						? ['invoice', 'sale', 'payment_in', 'others'].includes(txnType)
+						: ['bill', 'purchase', 'payment_out', 'others'].includes(txnType);
+					const txnDesc = (t.description ?? '').toLowerCase();
+					const txnRef = (t.reference ?? '').toLowerCase();
+					let nameScore = 0;
+					const bankWords = (bankDesc + ' ' + bankRef).split(/\s+/).filter((w: string) => w.length > 2);
+					const txnWords = (txnDesc + ' ' + txnRef).split(/\s+/).filter((w: string) => w.length > 2);
+					if (bankWords.length > 0 && txnWords.length > 0) {
+						const matches = bankWords.filter((bw: string) => txnWords.some((tw: string) => tw.includes(bw) || bw.includes(tw)));
+						nameScore = matches.length / Math.max(bankWords.length, 1);
+					}
+					const bankDate = bankLine?.transaction_date ?? '';
+					const txnDate = t.transaction_date ?? '';
+					const dateDiff = bankDate && txnDate ? Math.abs(new Date(bankDate).getTime() - new Date(txnDate).getTime()) / 86400000 : 999;
+					let score = 0;
+					if (amountMatch) score += 0.40;
+					if (directionMatch) score += 0.20;
+					score += nameScore * 0.25;
+					score += Math.max(0, (1 - dateDiff / 60)) * 0.15;
+					return { ...t, _totalAmount: totalDebit, _allocated: allocated, _remaining: remaining, _amountMatch: amountMatch, _directionMatch: directionMatch, _nameScore: nameScore, _dateDiff: dateDiff, _score: score };
 				})
-				.sort((a: any, b: any) => {
-					// Amount matches first
-					if (a._amountMatch && !b._amountMatch) return -1;
-					if (!a._amountMatch && b._amountMatch) return 1;
-					// Then by date (most recent first)
-					return (b.transaction_date ?? '').localeCompare(a.transaction_date ?? '');
-				});
-		} catch (err) {
-			toast.error(`${err}`);
+				.filter((t: any) => t._remaining > 0.01) // hide fully-covered entries
+				.sort((a: any, b: any) => b._score - a._score);
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
 			matchCandidates = [];
 		}
 		matchLoading = false;
 	};
 
+	// Toggle entry selection in multi-select mode
+	const toggleMatchEntry = (txnId: number) => {
+		if (matchSelectedIds.has(txnId)) {
+			matchSelectedIds.delete(txnId);
+		} else {
+			matchSelectedIds.add(txnId);
+		}
+		matchSelectedIds = new Set(matchSelectedIds);
+	};
+
+	// Single-select: match one entry to the BSL
 	const handleMatchSelect = async (transactionId: number) => {
 		if (matchingLineId === null) return;
 		try {
@@ -265,17 +352,139 @@
 			toast.success($i18n.t('Statement line matched'));
 			matchingLineId = null;
 			await loadStatements();
-		} catch (err) { toast.error(`${err}`); }
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 	};
 
-	$: filteredMatchCandidates = matchCandidates.filter((t: any) => {
+	// Multi-select: match multiple entries to the BSL
+	const handleMatchMultiple = async () => {
+		if (matchingLineId === null || matchSelectedIds.size === 0) return;
+		matchCreating = true;
+		try {
+			const selectedTxns = matchCandidates.filter((t: any) => matchSelectedIds.has(t.id));
+			const txnAllocations = selectedTxns.map((t: any) => ({
+				transaction_id: t.id,
+				allocated_amount: t._totalAmount,
+			}));
+			const bslAmount = txnAllocations.reduce((s: number, a: any) => s + a.allocated_amount, 0);
+			await createMatchGroup(companyId, {
+				bsl_allocations: [{ bank_statement_line_id: matchingLineId, allocated_amount: bslAmount }],
+				transaction_allocations: txnAllocations,
+			});
+
+			toast.success($i18n.t(`Matched ${matchSelectedIds.size} entries`));
+			matchingLineId = null;
+			matchSelectedIds = new Set();
+			matchMultiSelect = false;
+			await loadStatements();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+		matchCreating = false;
+	};
+
+	$: matchSelectedTotal = Array.from(matchSelectedIds).reduce((sum, id) => {
+		const txn = matchCandidates.find((t: any) => t.id === id);
+		return sum + (txn?._totalAmount ?? 0);
+	}, 0);
+
+	$: filteredMatchCandidates = matchCandidates.filter((item: any) => {
 		if (!matchSearchQuery) return true;
 		const q = matchSearchQuery.toLowerCase();
-		return (t.reference ?? '').toLowerCase().includes(q)
-			|| (t.description ?? '').toLowerCase().includes(q)
-			|| String(t.total ?? '').includes(q)
-			|| String(t.id).includes(q);
-	}).slice(0, 15);
+		return (item.reference ?? '').toLowerCase().includes(q)
+			|| (item.description ?? '').toLowerCase().includes(q)
+			|| String(item._totalAmount ?? item.total ?? '').includes(q)
+			|| String(item.id).includes(q);
+	}).slice(0, 20);
+
+	// Multi-BSL selection helpers
+	const toggleBslSelection = (lineId: number) => {
+		if (selectedBslIds.has(lineId)) {
+			selectedBslIds.delete(lineId);
+		} else {
+			selectedBslIds.add(lineId);
+		}
+		selectedBslIds = new Set(selectedBslIds);
+	};
+
+	$: selectedBslTotal = Array.from(selectedBslIds).reduce((sum, id) => {
+		const line = statements.find((s: any) => s.id === id);
+		return sum + (line ? Math.abs(parseFloat(line.amount)) - parseFloat(line.allocated_total || 0) : 0);
+	}, 0);
+
+	const openMultiMatchModal = async () => {
+		if (selectedBslIds.size < 1) return;
+		showMultiMatchModal = true;
+		multiMatchAllocations = new Map();
+		multiMatchLoading = true;
+		try {
+			const res = await getTransactions({ company_id: companyId, status: 'posted', limit: 200 });
+			const all = res?.transactions ?? res ?? [];
+
+			// Sum allocated amounts per transaction across all match groups
+			const txnAllocated = new Map<number, number>();
+			for (const s of statements) {
+				if (s.match_groups) {
+					for (const mg of s.match_groups) {
+						if (mg.transactions) {
+							for (const t of mg.transactions) {
+								txnAllocated.set(t.transaction_id, (txnAllocated.get(t.transaction_id) || 0) + parseFloat(t.allocated_amount || 0));
+							}
+						}
+					}
+				}
+			}
+
+			multiMatchInvoices = (Array.isArray(all) ? all : [])
+				.map((t: any) => {
+					const totalDebit = (t.lines ?? []).reduce((sum: number, l: any) => sum + parseFloat(l.debit || 0), 0);
+					const allocated = txnAllocated.get(t.id) || 0;
+					const remaining = totalDebit - allocated;
+					return { ...t, _totalAmount: totalDebit, _remaining: remaining };
+				})
+				.filter((t: any) => t._remaining > 0.01);
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
+			multiMatchInvoices = [];
+		}
+		multiMatchLoading = false;
+	};
+
+	$: multiMatchAllocTotal = Array.from(multiMatchAllocations.values()).reduce((s, v) => s + v, 0);
+	$: multiMatchRemaining = selectedBslTotal - multiMatchAllocTotal;
+
+	const toggleMultiMatchEntry = (txn: any) => {
+		if (multiMatchAllocations.has(txn.id)) {
+			multiMatchAllocations.delete(txn.id);
+		} else {
+			const remaining = selectedBslTotal - multiMatchAllocTotal;
+			multiMatchAllocations.set(txn.id, Math.min(txn._totalAmount, remaining));
+		}
+		multiMatchAllocations = new Map(multiMatchAllocations);
+	};
+
+	const handleMultiMatchCreate = async () => {
+		if (selectedBslIds.size === 0 || multiMatchAllocations.size === 0) return;
+		multiMatchCreating = true;
+		try {
+			const bslAllocs = Array.from(selectedBslIds).map(id => {
+				const line = statements.find((s: any) => s.id === id);
+				const unalloc = line ? Math.abs(parseFloat(line.amount)) - parseFloat(line.allocated_total || 0) : 0;
+				return { bank_statement_line_id: id, allocated_amount: unalloc };
+			});
+			const txnAllocs = Array.from(multiMatchAllocations.entries()).map(([txn_id, amt]) => ({
+				transaction_id: txn_id,
+				allocated_amount: amt,
+			}));
+			await createMatchGroup(companyId, {
+				bsl_allocations: bslAllocs,
+				transaction_allocations: txnAllocs,
+			});
+			toast.success($i18n.t('Match group created'));
+			showMultiMatchModal = false;
+			selectedBslIds = new Set();
+			multiMatchAllocations = new Map();
+			await loadStatements();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+		multiMatchCreating = false;
+	};
 
 	// Close match popover on outside click
 	const handleDocumentClick = (e: MouseEvent) => {
@@ -294,67 +503,16 @@
 		document.removeEventListener('click', handleDocumentClick);
 	});
 
-	// Create entry from unmatched line
+	// Create entry from unmatched line — opens the full TransactionFormModal
 	const openCreateEntry = (line: any) => {
-		createEntryLine = line;
-		createEntryDate = line.transaction_date ?? '';
-		createEntryDescription = line.description ?? '';
-		createEntryAmount = Math.abs(parseFloat(line.amount) || 0);
-		const isExpense = parseFloat(line.amount) < 0;
-
-		const bankAcct = bankAccounts.find(ba => ba.id === selectedBankId);
-		const bankGlAccountId = bankAcct?.account_id ?? null;
-
-		if (isExpense) {
-			// DR expense / CR bank
-			createEntryDebitAccountId = null; // user picks expense account
-			createEntryCreditAccountId = bankGlAccountId;
-		} else {
-			// DR bank / CR revenue
-			createEntryDebitAccountId = bankGlAccountId;
-			createEntryCreditAccountId = null; // user picks revenue account
-		}
+		createEntryBslId = line.id;
 		showCreateEntryModal = true;
 	};
 
-	const handleCreateEntry = async () => {
-		if (!createEntryDebitAccountId || !createEntryCreditAccountId || !createEntryAmount || !createEntryDate) {
-			toast.error($i18n.t('Please fill all required fields'));
-			return;
-		}
-		creatingEntry = true;
-		try {
-			const data: Record<string, any> = {
-				transaction_date: createEntryDate,
-				description: createEntryDescription,
-				reference: createEntryLine?.reference ?? '',
-				type: 'journal',
-				lines: [
-					{ account_id: createEntryDebitAccountId, debit: createEntryAmount, credit: 0 },
-					{ account_id: createEntryCreditAccountId, debit: 0, credit: createEntryAmount },
-				]
-			};
-			const txn = await createTransaction(data, companyId);
-			const txnId = txn?.id ?? txn?.transaction?.id;
-
-			// Post the transaction
-			if (txnId) {
-				try {
-					await postTransaction(txnId);
-				} catch { /* posting might not be required */ }
-			}
-
-			// Auto-match the bank line to the new transaction
-			if (txnId && createEntryLine?.id) {
-				await matchBankStatement(createEntryLine.id, txnId);
-			}
-
-			toast.success($i18n.t('Entry created and matched'));
-			showCreateEntryModal = false;
-			createEntryLine = null;
-			await loadStatements();
-		} catch (err) { toast.error(`${err}`); }
-		creatingEntry = false;
+	const handleCreateEntrySave = async () => {
+		showCreateEntryModal = false;
+		createEntryBslId = null;
+		await loadStatements();
 	};
 
 	const fmt = (v: any): string => {
@@ -372,6 +530,7 @@
 		switch (s) {
 			case 'auto_matched': return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400';
 			case 'manual_matched': return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400';
+			case 'partial_matched': return 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400';
 			case 'excluded': return 'bg-gray-100 dark:bg-gray-800 text-gray-500';
 			default: return 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400';
 		}
@@ -381,12 +540,14 @@
 		switch (s) {
 			case 'auto_matched': return 'Auto';
 			case 'manual_matched': return 'Matched';
+			case 'partial_matched': return 'Partial';
 			case 'excluded': return 'Excluded';
 			default: return 'Unmatched';
 		}
 	};
 
-	$: matchedCount = statements.filter(s => s.match_status !== 'unmatched').length;
+	$: matchedCount = statements.filter(s => ['auto_matched', 'manual_matched'].includes(s.match_status)).length;
+	$: partialCount = statements.filter(s => s.match_status === 'partial_matched').length;
 	$: unmatchedCount = statements.filter(s => s.match_status === 'unmatched').length;
 	$: selectedBankCurrency = bankAccounts.find(ba => ba.id === selectedBankId)?.currency || '';
 	$: if (selectedBankCurrency && !displayCurrency) displayCurrency = selectedBankCurrency;
@@ -406,6 +567,26 @@
 	$: reconDifference = bankBalance - glBalance;
 	$: isReconciled = Math.abs(reconDifference) < 0.01;
 
+	// Client-side search & filter on loaded statements
+	$: filteredStatements = statements.filter((s: any) => {
+		// Text search
+		if (searchQuery) {
+			const q = searchQuery.toLowerCase();
+			const match = (s.description ?? '').toLowerCase().includes(q)
+				|| (s.reference ?? '').toLowerCase().includes(q)
+				|| String(s.amount ?? '').includes(q)
+				|| (s.transaction_date ?? '').includes(q);
+			if (!match) return false;
+		}
+		// Date range
+		if (dateFrom && s.transaction_date < dateFrom) return false;
+		if (dateTo && s.transaction_date > dateTo) return false;
+		// Direction
+		if (directionFilter === 'credit' && parseFloat(s.amount) <= 0) return false;
+		if (directionFilter === 'debit' && parseFloat(s.amount) >= 0) return false;
+		return true;
+	});
+
 	// Import modal portal
 	let importModalEl: HTMLDivElement | null = null;
 	let importMounted = false;
@@ -421,22 +602,10 @@
 		}
 	}
 
-	// Create entry modal portal
-	let createEntryModalEl: HTMLDivElement | null = null;
-
-	$: if (importMounted) {
-		if (showCreateEntryModal && createEntryModalEl) {
-			document.body.appendChild(createEntryModalEl);
-			document.body.style.overflow = 'hidden';
-		} else if (createEntryModalEl) {
-			try { document.body.removeChild(createEntryModalEl); } catch {}
-			document.body.style.overflow = 'unset';
-		}
-	}
-
 	const handleGlobalKeydown = (e: KeyboardEvent) => {
 		if (e.key === 'Escape') {
-			if (showImportModal) showImportModal = false;
+			if (showMultiMatchModal) showMultiMatchModal = false;
+			else if (showImportModal) showImportModal = false;
 			else if (showCreateEntryModal) showCreateEntryModal = false;
 		}
 	};
@@ -447,13 +616,7 @@
 	onDestroy(() => {
 		window.removeEventListener('keydown', handleGlobalKeydown);
 		if (importModalEl) try { document.body.removeChild(importModalEl); } catch {}
-		if (createEntryModalEl) try { document.body.removeChild(createEntryModalEl); } catch {}
 	});
-
-	// Account helpers for create entry modal
-	$: expenseAccounts = accounts.filter(a => a.account_type === 'expense' || (a.code && a.code.startsWith('6')));
-	$: revenueAccounts = accounts.filter(a => a.account_type === 'revenue' || (a.code && a.code.startsWith('7')));
-	$: allAccountsSorted = [...accounts].sort((a, b) => (a.code ?? '').localeCompare(b.code ?? ''));
 </script>
 
 <!-- Import Statement Modal -->
@@ -479,12 +642,12 @@
 				<div class="space-y-4">
 					<div>
 						<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-							{$i18n.t('CSV File')} *
+							{$i18n.t('Bank Statement (CSV or Excel)')} *
 						</label>
 						<input
 							bind:this={importFileInput}
 							type="file"
-							accept=".csv"
+							accept=".csv,.xlsx,.xls"
 							class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition file:mr-3 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 dark:file:bg-blue-900/30 dark:file:text-blue-300"
 						/>
 					</div>
@@ -512,7 +675,7 @@
 						<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-4">
 							<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
 						</svg>
-						{$i18n.t('Download Sample CSV Template')}
+						{$i18n.t('Download Sample Template (.xlsx)')}
 					</button>
 				</div>
 
@@ -543,126 +706,15 @@
 	</div>
 {/if}
 
-<!-- Create Entry Modal -->
-{#if showCreateEntryModal && createEntryLine}
-	<!-- svelte-ignore a11y-click-events-have-key-events -->
-	<!-- svelte-ignore a11y-no-static-element-interactions -->
-	<div
-		bind:this={createEntryModalEl}
-		class="fixed top-0 right-0 left-0 bottom-0 bg-black/60 w-full h-screen max-h-[100dvh] flex justify-center z-[50000] overflow-hidden overscroll-contain"
-		in:fade={{ duration: 10 }}
-		on:mousedown={() => { showCreateEntryModal = false; }}
-	>
-		<div
-			class="m-auto max-w-full w-[32rem] mx-2 bg-white/95 dark:bg-gray-950/95 backdrop-blur-sm rounded-4xl max-h-[90dvh] shadow-3xl border border-white dark:border-gray-900 overflow-y-auto"
-			in:flyAndScale
-			on:mousedown={(e) => { e.stopPropagation(); }}
-		>
-			<div class="px-[1.75rem] py-6 flex flex-col">
-				<div class="text-lg font-medium dark:text-gray-200 mb-1">
-					{$i18n.t('Create Journal Entry')}
-				</div>
-				<p class="text-xs text-gray-400 dark:text-gray-500 mb-4">
-					{$i18n.t('Create a journal entry from this bank statement line and auto-match it.')}
-				</p>
-
-				<div class="space-y-3">
-					<!-- Date + Amount -->
-					<div class="grid grid-cols-2 gap-3">
-						<div>
-							<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Date')} *</label>
-							<input
-								type="date"
-								bind:value={createEntryDate}
-								class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition"
-							/>
-						</div>
-						<div>
-							<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Amount')} *</label>
-							<input
-								type="number"
-								step="0.01"
-								bind:value={createEntryAmount}
-								class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition"
-							/>
-						</div>
-					</div>
-
-					<!-- Description -->
-					<div>
-						<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Description')}</label>
-						<input
-							type="text"
-							bind:value={createEntryDescription}
-							class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition"
-						/>
-					</div>
-
-					<!-- Account selection -->
-					<div class="grid grid-cols-2 gap-3">
-						<div>
-							<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Debit Account')} *</label>
-							<select
-								bind:value={createEntryDebitAccountId}
-								class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition"
-							>
-								<option value={null}>{$i18n.t('Select account...')}</option>
-								{#each allAccountsSorted as acct}
-									<option value={acct.id}>{acct.code} — {acct.name}</option>
-								{/each}
-							</select>
-						</div>
-						<div>
-							<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Credit Account')} *</label>
-							<select
-								bind:value={createEntryCreditAccountId}
-								class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition"
-							>
-								<option value={null}>{$i18n.t('Select account...')}</option>
-								{#each allAccountsSorted as acct}
-									<option value={acct.id}>{acct.code} — {acct.name}</option>
-								{/each}
-							</select>
-						</div>
-					</div>
-
-					{#if parseFloat(createEntryLine.amount) < 0}
-						<p class="text-[10px] text-gray-400 dark:text-gray-500 italic">
-							{$i18n.t('Expense: debit an expense account (e.g. 627 Bank Fees), credit the bank account (512).')}
-						</p>
-					{:else}
-						<p class="text-[10px] text-gray-400 dark:text-gray-500 italic">
-							{$i18n.t('Income: debit the bank account (512), credit a revenue account (e.g. 7xx).')}
-						</p>
-					{/if}
-				</div>
-
-				<div class="mt-6 flex justify-between gap-1.5">
-					<button
-						class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white font-medium w-full py-2 rounded-3xl transition"
-						on:click={() => { showCreateEntryModal = false; createEntryLine = null; }}
-						type="button"
-						disabled={creatingEntry}
-					>
-						{$i18n.t('Cancel')}
-					</button>
-					<button
-						class="text-sm bg-gray-900 hover:bg-gray-850 text-gray-100 dark:bg-gray-100 dark:hover:bg-white dark:text-gray-800 font-medium w-full py-2 rounded-3xl transition disabled:opacity-50"
-						on:click={handleCreateEntry}
-						type="button"
-						disabled={creatingEntry}
-					>
-						{#if creatingEntry}
-							{$i18n.t('Creating...')}
-						{:else}
-							{$i18n.t('Create & Match')}
-						{/if}
-					</button>
-				</div>
-			</div>
-		</div>
-	</div>
-{/if}
+<!-- Create Entry Modal (reuses the same form as the Entries tab) -->
+<TransactionFormModal
+	bind:show={showCreateEntryModal}
+	transaction={null}
+	{accounts}
+	{companyId}
+	bankStatementLineId={createEntryBslId}
+	on:save={handleCreateEntrySave}
+/>
 
 <div class="space-y-3">
 	<!-- Header: Bank selector + actions -->
@@ -781,37 +833,108 @@
 			</div>
 		</div>
 
-		<!-- Filter tabs -->
-		<div class="flex gap-1">
-			{#each [['', 'All'], ['unmatched', 'Unmatched'], ['auto_matched', 'Auto'], ['manual_matched', 'Manual']] as [val, label]}
+		<!-- Filter tabs + Search -->
+		<div class="flex flex-wrap gap-2 items-center">
+			<div class="flex gap-1">
+				{#each [['', 'All'], ['unmatched', 'Unmatched'], ['partial_matched', 'Partial'], ['auto_matched', 'Auto'], ['manual_matched', 'Manual'], ['excluded', 'Excluded']] as [val, label]}
+					<button
+						class="px-2 py-1 text-xs rounded {statusFilter === val ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'} transition"
+						on:click={() => { statusFilter = val; loadStatements(); }}
+					>{$i18n.t(label)}</button>
+				{/each}
+			</div>
+			<div class="flex gap-1">
+				{#each [['', 'All'], ['credit', 'Credit (In)'], ['debit', 'Debit (Out)']] as [val, label]}
+					<button
+						class="px-2 py-1 text-xs rounded {directionFilter === val ? 'bg-emerald-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'} transition"
+						on:click={() => { directionFilter = val; }}
+					>{$i18n.t(label)}</button>
+				{/each}
+			</div>
+			<input
+				type="text"
+				bind:value={searchQuery}
+				placeholder={$i18n.t('Search description, reference, amount...')}
+				class="flex-1 min-w-[180px] text-xs rounded-lg px-3 py-1.5 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden focus:border-blue-500 transition"
+			/>
+			<input type="date" bind:value={dateFrom} class="text-xs rounded-lg px-2 py-1.5 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden" placeholder={$i18n.t('From')} />
+			<input type="date" bind:value={dateTo} class="text-xs rounded-lg px-2 py-1.5 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden" placeholder={$i18n.t('To')} />
+			{#if searchQuery || dateFrom || dateTo || directionFilter}
 				<button
-					class="px-2 py-1 text-xs rounded {statusFilter === val ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'} transition"
-					on:click={() => { statusFilter = val; loadStatements(); }}
-				>{$i18n.t(label)}</button>
-			{/each}
+					class="px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-400 dark:hover:bg-red-900/30 transition"
+					on:click={() => { searchQuery = ''; dateFrom = ''; dateTo = ''; directionFilter = ''; }}
+				>{$i18n.t('Clear')}</button>
+			{/if}
 		</div>
+		{#if searchQuery || dateFrom || dateTo || directionFilter}
+			<div class="text-[10px] text-gray-400">{filteredStatements.length} / {statements.length} {$i18n.t('lines')}</div>
+		{/if}
 
 		{#if statementsLoading}
 			<div class="flex justify-center my-6"><Spinner className="size-5" /></div>
 		{:else if statements.length === 0}
 			<div class="text-sm text-gray-400 italic text-center py-6">{$i18n.t('No statement lines. Import a CSV to get started.')}</div>
 		{:else}
-			<div class="overflow-x-auto bg-white dark:bg-gray-900 rounded-xl border border-gray-100/30 dark:border-gray-850/30">
+			{#if selectedBslIds.size > 0}
+				<div class="px-3 py-2 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-t-xl flex items-center gap-3 text-xs">
+					<span class="font-medium text-blue-700 dark:text-blue-300">{selectedBslIds.size} {$i18n.t('line(s) selected')}</span>
+					<span class="text-blue-600 dark:text-blue-400">{$i18n.t('Total')}: {fmt(selectedBslTotal)}</span>
+					<button
+						class="px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium transition"
+						on:click={openMultiMatchModal}
+					>{$i18n.t('Match Selected to Entry(s)')}</button>
+					<button
+						class="px-2 py-1 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+						on:click={() => { selectedBslIds = new Set(); }}
+					>{$i18n.t('Clear')}</button>
+				</div>
+			{/if}
+			<div class="overflow-x-auto bg-white dark:bg-gray-900 {selectedBslIds.size > 0 ? 'rounded-b-xl' : 'rounded-xl'} border border-gray-100/30 dark:border-gray-850/30">
 				<table class="w-full text-xs text-left text-gray-700 dark:text-gray-300">
 					<thead class="text-[10px] uppercase bg-gray-50 dark:bg-gray-850/50 text-gray-600 dark:text-gray-400">
 						<tr>
+							<th class="px-1 py-2 w-8">
+								<input
+									type="checkbox"
+									class="rounded border-gray-300 dark:border-gray-600"
+									checked={selectedBslIds.size > 0 && selectedBslIds.size === filteredStatements.filter(s => ['unmatched', 'partial_matched'].includes(s.match_status)).length}
+									on:change={(e) => {
+										if (e.currentTarget.checked) {
+											selectedBslIds = new Set(filteredStatements.filter(s => ['unmatched', 'partial_matched'].includes(s.match_status)).map(s => s.id));
+										} else {
+											selectedBslIds = new Set();
+										}
+									}}
+								/>
+							</th>
+							<th class="px-2 py-2">{$i18n.t('#')}</th>
 							<th class="px-2 py-2">{$i18n.t('Date')}</th>
 							<th class="px-2 py-2">{$i18n.t('Description')}</th>
 							<th class="px-2 py-2">{$i18n.t('Reference')}</th>
-							<th class="px-2 py-2 text-right">{$i18n.t('Amount')}</th>
+							<th class="px-2 py-2 text-right">{$i18n.t('Debit')}</th>
+							<th class="px-2 py-2 text-right">{$i18n.t('Credit')}</th>
 							<th class="px-2 py-2 text-center">{$i18n.t('Currency')}</th>
 							<th class="px-2 py-2 text-center">{$i18n.t('Status')}</th>
 							<th class="px-2 py-2 text-right">{$i18n.t('Actions')}</th>
 						</tr>
 					</thead>
 					<tbody>
-						{#each statements as line (line.id)}
+						{#if filteredStatements.length === 0 && statements.length > 0}
+							<tr><td colspan="10" class="px-4 py-6 text-center text-xs text-gray-400 italic">{$i18n.t('No lines match your filters.')}</td></tr>
+						{/if}
+						{#each filteredStatements as line (line.id)}
 							<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
+								<td class="px-1 py-1.5">
+									{#if ['unmatched', 'partial_matched'].includes(line.match_status)}
+										<input
+											type="checkbox"
+											class="rounded border-gray-300 dark:border-gray-600"
+											checked={selectedBslIds.has(line.id)}
+											on:change={() => toggleBslSelection(line.id)}
+										/>
+									{/if}
+								</td>
+								<td class="px-2 py-1.5 whitespace-nowrap text-gray-400 font-mono text-[10px]">{line.id}</td>
 								<td class="px-2 py-1.5 whitespace-nowrap">{line.transaction_date}</td>
 								<td class="px-2 py-1.5 max-w-[200px] truncate" title={line.description ?? ''}>{line.description ?? '—'}</td>
 								<td class="px-2 py-1.5 font-mono">
@@ -837,18 +960,16 @@
 										</span>
 									{/if}
 								</td>
-								<td class="px-2 py-1.5 text-right font-mono {parseFloat(line.amount) < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
-									{#if showConverted}
-										{@const conv = convertAmount(parseFloat(line.amount), selectedBankCurrency, line.transaction_date)}
-										{#if conv.converted !== null}
-											<div class="font-semibold">{fmt(conv.converted)} {displayCurrency}</div>
-											<div class="text-[10px] text-gray-400 dark:text-gray-500 font-normal">({fmt(line.amount)} {selectedBankCurrency})</div>
-										{:else}
-											<div>{fmt(line.amount)}</div>
-											<div class="text-[10px] text-yellow-500 dark:text-yellow-400 font-normal italic">{$i18n.t('no rate')}</div>
-										{/if}
-									{:else}
-										{fmt(line.amount)}
+								<!-- Debit (outflow) -->
+								<td class="px-2 py-1.5 text-right font-mono text-red-600 dark:text-red-400">
+									{#if parseFloat(line.amount) < 0}
+										{fmt(Math.abs(parseFloat(line.amount)))}
+									{/if}
+								</td>
+								<!-- Credit (inflow) -->
+								<td class="px-2 py-1.5 text-right font-mono text-green-600 dark:text-green-400">
+									{#if parseFloat(line.amount) > 0}
+										{fmt(parseFloat(line.amount))}
 									{/if}
 								</td>
 								<td class="px-2 py-1.5 text-center text-gray-500 dark:text-gray-400 font-mono text-[10px]">{showConverted ? displayCurrency : (selectedBankCurrency || '—')}</td>
@@ -860,30 +981,27 @@
 										{#if line.match_status === 'auto_matched' && line.match_confidence}
 											<span class="text-[10px] text-gray-400">{Math.round(parseFloat(line.match_confidence) * 100)}%</span>
 										{/if}
+										{#if line.match_status === 'partial_matched'}
+											<span class="text-[10px] text-orange-500 font-mono">{fmt(line.allocated_total)}/{fmt(Math.abs(parseFloat(line.amount)))}</span>
+										{/if}
 									</div>
-									{#if line.matched_transaction_id}
-										<a
-											href="/accounting/company/{companyId}/entries"
-											class="mt-0.5 block text-[10px] text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 leading-tight hover:underline transition"
-											title="{$i18n.t('View entry')} #{line.matched_transaction_id}"
+									{#if line.matched_transaction_id || (line.match_groups && line.match_groups.length > 0)}
+										<button
+											class="mt-0.5 flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 transition"
+											on:click|stopPropagation={() => { expandedLineId = expandedLineId === line.id ? null : line.id; }}
 										>
-											<span class="font-mono font-medium">#{line.matched_transaction_id}</span>
-											{#if line.matched_txn_type}
-												<span class="ml-1 px-1 py-0 rounded bg-blue-50 dark:bg-blue-900/30 text-[9px]">{line.matched_txn_type}</span>
+											<svg class="w-3 h-3 transition-transform {expandedLineId === line.id ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+											{#if line.matched_transaction_id}
+												<span class="font-mono font-medium">#{line.matched_transaction_id}</span>
 											{/if}
-											{#if line.matched_txn_reference}
-												<span class="ml-1 font-mono">{line.matched_txn_reference}</span>
+											{#if line.match_groups && line.match_groups.length > 0}
+												<span class="px-1 py-0 rounded bg-blue-50 dark:bg-blue-900/30 text-[9px]">{line.match_groups.length} {$i18n.t('group(s)')}</span>
 											{/if}
-											{#if line.matched_txn_description}
-												<div class="text-[10px] text-gray-400 dark:text-gray-500 truncate max-w-[200px]" title={line.matched_txn_description}>
-													{line.matched_txn_description}
-												</div>
-											{/if}
-										</a>
+										</button>
 									{/if}
 								</td>
 								<td class="px-2 py-1.5 text-right whitespace-nowrap">
-									{#if line.match_status === 'unmatched'}
+									{#if line.match_status === 'unmatched' || line.match_status === 'partial_matched'}
 										<!-- Match button with popover -->
 										<div class="inline-block relative">
 											<button
@@ -893,34 +1011,159 @@
 													else { openMatchPopover(line); }
 												}}
 											>
-												{$i18n.t('Match')} &#9660;
+												{line.match_status === 'partial_matched' ? $i18n.t('Match More') : $i18n.t('Match')} &#9660;
 											</button>
 											{#if matchingLineId === line.id}
 												<!-- Full-width match panel below the row -->
 											{/if}
 										</div>
-										<button
-											class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700 transition"
-											on:click={() => openCreateEntry(line)}
-										>
-											{$i18n.t('Create Entry')}
-										</button>
+										{#if line.match_status === 'partial_matched'}
+											<button class="ml-1 text-xs text-red-500 hover:text-red-700 transition" on:click={() => handleUnmatch(line.id)}>{$i18n.t('Unmatch')}</button>
+										{:else}
+											<button
+												class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded transition {line.suggested_bank_fee_rule ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'}"
+												on:click={() => openCreateEntry(line)}
+											>
+												{line.suggested_bank_fee_rule ? $i18n.t('Bank Fee') : $i18n.t('Create Entry')}
+											</button>
+										{/if}
 									{:else}
 										<button class="text-xs text-red-500 hover:text-red-700 transition" on:click={() => handleUnmatch(line.id)}>{$i18n.t('Unmatch')}</button>
+										{#if line.payment_id}
+											<span class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
+												{$i18n.t('Posted')}
+											</span>
+										{:else}
+											<button
+												class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50 transition"
+												on:click|stopPropagation={() => handlePay(line)}
+											>
+												{$i18n.t('Post')}
+											</button>
+										{/if}
 									{/if}
 								</td>
 							</tr>
+							<!-- Expandable matched details row -->
+							{#if expandedLineId === line.id && (line.matched_transaction_id || (line.match_groups && line.match_groups.length > 0))}
+								<tr class="bg-gray-50/80 dark:bg-gray-850/50">
+									<td colspan="10" class="px-4 py-2">
+										<div class="text-[10px] uppercase font-medium text-gray-500 dark:text-gray-400 mb-1.5">{$i18n.t('Matched Entries')}</div>
+										<div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+											<table class="w-full text-xs">
+												<thead class="text-[10px] bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+													<tr>
+														<th class="px-2 py-1 text-left">#</th>
+														<th class="px-2 py-1 text-left">{$i18n.t('Date')}</th>
+														<th class="px-2 py-1 text-left">{$i18n.t('Type')}</th>
+														<th class="px-2 py-1 text-left">{$i18n.t('Reference')}</th>
+														<th class="px-2 py-1 text-left">{$i18n.t('Description')}</th>
+														<th class="px-2 py-1 text-right">{$i18n.t('Amount')}</th>
+														<th class="px-2 py-1 text-left">{$i18n.t('Status')}</th>
+													</tr>
+												</thead>
+												<tbody>
+													{#if line.matched_transaction_id && line.matched_txn_type}
+														<tr class="border-t border-gray-100 dark:border-gray-800">
+															<td class="px-2 py-1 font-mono text-blue-600 dark:text-blue-400">
+																<a href="/accounting/company/{companyId}/entries" class="hover:underline">#{line.matched_transaction_id}</a>
+															</td>
+															<td class="px-2 py-1 font-mono">{line.matched_txn_date ?? '—'}</td>
+															<td class="px-2 py-1">
+																<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">{line.matched_txn_type}</span>
+															</td>
+															<td class="px-2 py-1 font-mono">{line.matched_txn_reference ?? '—'}</td>
+															<td class="px-2 py-1 max-w-[250px] truncate" title={line.matched_txn_description ?? ''}>{line.matched_txn_description ?? '—'}</td>
+															<td class="px-2 py-1 text-right font-mono font-medium">{fmt(Math.abs(parseFloat(line.amount)))}</td>
+															<td class="px-2 py-1">
+																<span class="text-[10px] px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">{$i18n.t('Matched')}</span>
+															</td>
+														</tr>
+													{/if}
+													{#if line.match_groups}
+														{#each line.match_groups as mg}
+															{#if mg.transactions && mg.transactions.length > 0}
+																{#each mg.transactions as txn}
+																	<tr class="border-t border-gray-100 dark:border-gray-800">
+																		<td class="px-2 py-1 font-mono text-blue-600 dark:text-blue-400">
+																			<a href="/accounting/company/{companyId}/entries" class="hover:underline">#{txn.transaction_id}</a>
+																		</td>
+																		<td class="px-2 py-1 font-mono">{txn.date ?? '—'}</td>
+																		<td class="px-2 py-1">
+																			<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">{txn.type ?? '—'}</span>
+																		</td>
+																		<td class="px-2 py-1 font-mono">{txn.reference ?? '—'}</td>
+																		<td class="px-2 py-1 max-w-[250px] truncate" title={txn.description ?? ''}>{txn.description ?? '—'}</td>
+																		<td class="px-2 py-1 text-right font-mono font-medium">{fmt(txn.allocated_amount)}</td>
+																		<td class="px-2 py-1">
+																			<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 font-medium">{$i18n.t('Group')} #{mg.id}</span>
+																		</td>
+																	</tr>
+																{/each}
+															{:else}
+																<tr class="border-t border-gray-100 dark:border-gray-800">
+																	<td class="px-2 py-1 text-gray-400" colspan="5">
+																		<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{$i18n.t('Group')} #{mg.id}</span>
+																		<span class="ml-2">{$i18n.t('Allocated')}: {fmt(mg.allocated_amount)}</span>
+																	</td>
+																	<td class="px-2 py-1 text-right font-mono font-medium">{fmt(mg.allocated_amount)}</td>
+																	<td class="px-2 py-1"></td>
+																</tr>
+															{/if}
+														{/each}
+													{/if}
+													{#if !line.matched_transaction_id && (!line.match_groups || line.match_groups.length === 0)}
+														<tr><td colspan="7" class="px-2 py-3 text-center text-gray-400 italic text-[10px]">{$i18n.t('No matched entries found.')}</td></tr>
+													{/if}
+												</tbody>
+											</table>
+										</div>
+									</td>
+								</tr>
+							{/if}
 							<!-- Match panel (shown below the row when matching) -->
 							{#if matchingLineId === line.id}
-								<tr class="bg-blue-50/50 dark:bg-blue-950/20">
-									<td colspan="7" class="px-3 py-3">
+								<tr class="match-popover bg-blue-50/50 dark:bg-blue-950/20">
+									<td colspan="10" class="px-3 py-3">
 										<div class="flex items-center justify-between mb-2">
 											<div class="flex items-center gap-2">
-												<span class="text-xs font-medium text-blue-700 dark:text-blue-300">{$i18n.t('Select a transaction to match with')}:</span>
+												<span class="text-xs font-medium text-blue-700 dark:text-blue-300">{$i18n.t('Match to entry')}:</span>
 												<span class="text-[10px] text-gray-500">{line.transaction_date} — {line.description} — {fmt(line.amount)}</span>
+												{#if parseFloat(line.allocated_total || 0) > 0}
+													<span class="text-[10px] text-orange-500">({$i18n.t('Unallocated')}: {fmt(line.unallocated_amount ?? (Math.abs(parseFloat(line.amount)) - parseFloat(line.allocated_total || 0)))})</span>
+												{/if}
 											</div>
-											<button class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" on:click={() => { matchingLineId = null; }}>✕ {$i18n.t('Close')}</button>
+											<div class="flex items-center gap-2">
+												<!-- Multi-select toggle -->
+												<label class="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
+													<input type="checkbox" class="rounded border-gray-300 dark:border-gray-600" bind:checked={matchMultiSelect} on:change={() => { matchSelectedIds = new Set(); }} />
+													{$i18n.t('Multi-select')}
+												</label>
+												<button class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" on:click={() => { matchingLineId = null; }}>✕ {$i18n.t('Close')}</button>
+											</div>
 										</div>
+
+										<!-- Multi-select summary bar -->
+										{#if matchMultiSelect && matchSelectedIds.size > 0}
+											<div class="mb-2 px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-between text-xs">
+												<div class="flex gap-4">
+													<span>{$i18n.t('Selected')}: <strong>{matchSelectedIds.size}</strong> {$i18n.t('entries')}</span>
+													<span>{$i18n.t('Total')}: <strong class="font-mono">{fmt(matchSelectedTotal)}</strong></span>
+												</div>
+												<button
+													class="px-3 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-700 font-medium transition disabled:opacity-50"
+													disabled={matchSelectedIds.size === 0 || matchCreating}
+													on:click={handleMatchMultiple}
+												>
+													{#if matchCreating}
+														{$i18n.t('Matching...')}
+													{:else}
+														{$i18n.t('Match Selected')}
+													{/if}
+												</button>
+											</div>
+										{/if}
+
 										<div class="mb-2">
 											<input
 												type="text"
@@ -929,15 +1172,19 @@
 												class="w-full text-xs rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden focus:border-blue-500"
 											/>
 										</div>
+
 										{#if matchLoading}
 											<div class="flex justify-center py-4"><Spinner className="size-4" /></div>
 										{:else if filteredMatchCandidates.length === 0}
-											<div class="text-xs text-gray-400 italic text-center py-4">{$i18n.t('No transactions found. Create a journal entry first, then match.')}</div>
+											<div class="text-xs text-gray-400 italic text-center py-4">
+												{$i18n.t('No posted entries found. Create a journal entry first, then match.')}
+											</div>
 										{:else}
 											<div class="overflow-x-auto max-h-64 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700">
 												<table class="w-full text-xs">
 													<thead class="text-[10px] uppercase bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 sticky top-0">
 														<tr>
+															{#if matchMultiSelect}<th class="px-2 py-1.5 w-8"></th>{/if}
 															<th class="px-2 py-1.5 text-left"></th>
 															<th class="px-2 py-1.5 text-left">#</th>
 															<th class="px-2 py-1.5 text-left">{$i18n.t('Date')}</th>
@@ -945,16 +1192,35 @@
 															<th class="px-2 py-1.5 text-left">{$i18n.t('Reference')}</th>
 															<th class="px-2 py-1.5 text-left">{$i18n.t('Description')}</th>
 															<th class="px-2 py-1.5 text-right">{$i18n.t('Amount')}</th>
-															<th class="px-2 py-1.5"></th>
+															{#if !matchMultiSelect}<th class="px-2 py-1.5"></th>{/if}
 														</tr>
 													</thead>
 													<tbody>
 														{#each filteredMatchCandidates as txn}
-															<tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-850 transition {txn._amountMatch ? 'bg-green-50/30 dark:bg-green-900/10' : ''}">
+															{@const isSelected = matchSelectedIds.has(txn.id)}
+															<tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-850 transition {txn._score >= 0.5 ? 'bg-green-50/30 dark:bg-green-900/10' : ''} {isSelected ? 'bg-blue-50/50 dark:bg-blue-900/20' : ''}">
+																{#if matchMultiSelect}
+																	<td class="px-2 py-1.5">
+																		<input
+																			type="checkbox"
+																			class="rounded border-gray-300 dark:border-gray-600"
+																			checked={isSelected}
+																			on:change={() => toggleMatchEntry(txn.id)}
+																		/>
+																	</td>
+																{/if}
 																<td class="px-2 py-1.5">
-																	{#if txn._amountMatch}
-																		<span class="text-[9px] px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-semibold">{$i18n.t('Match')}</span>
-																	{/if}
+																	<div class="flex gap-0.5 flex-wrap">
+																		{#if txn._amountMatch}
+																			<span class="text-[9px] px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-semibold">{$i18n.t('Amount')}</span>
+																		{/if}
+																		{#if txn._nameScore > 0.3}
+																			<span class="text-[9px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 font-semibold">{$i18n.t('Name')}</span>
+																		{/if}
+																		{#if txn.invoice_id}
+																			<span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 font-semibold">{$i18n.t('Invoice')}</span>
+																		{/if}
+																	</div>
 																</td>
 																<td class="px-2 py-1.5 font-mono text-gray-400">{txn.id}</td>
 																<td class="px-2 py-1.5 font-mono">{txn.transaction_date ?? '—'}</td>
@@ -963,13 +1229,15 @@
 																</td>
 																<td class="px-2 py-1.5 font-mono">{txn.reference ?? '—'}</td>
 																<td class="px-2 py-1.5 max-w-[200px] truncate" title={txn.description ?? ''}>{txn.description ?? '—'}</td>
-																<td class="px-2 py-1.5 text-right font-mono font-medium">{fmt(txn.total ?? 0)}</td>
-																<td class="px-2 py-1.5">
-																	<button
-																		class="px-2 py-0.5 text-[10px] font-medium rounded bg-blue-600 text-white hover:bg-blue-700 transition"
-																		on:click={() => handleMatchSelect(txn.id)}
-																	>{$i18n.t('Select')}</button>
-																</td>
+																<td class="px-2 py-1.5 text-right font-mono font-medium">{fmt(txn._totalAmount ?? txn.total ?? 0)}</td>
+																{#if !matchMultiSelect}
+																	<td class="px-2 py-1.5">
+																		<button
+																			class="px-2 py-0.5 text-[10px] font-medium rounded bg-blue-600 text-white hover:bg-blue-700 transition"
+																			on:click={() => handleMatchSelect(txn.id)}
+																		>{$i18n.t('Select')}</button>
+																	</td>
+																{/if}
 															</tr>
 														{/each}
 													</tbody>
@@ -988,3 +1256,115 @@
 		<div class="text-sm text-gray-400 italic text-center py-6">{$i18n.t('No bank accounts. Create one to start reconciling.')}</div>
 	{/if}
 </div>
+
+<!-- Multi-BSL Match Modal -->
+{#if showMultiMatchModal}
+	<!-- svelte-ignore a11y-click-events-have-key-events -->
+	<!-- svelte-ignore a11y-no-static-element-interactions -->
+	<div
+		class="fixed top-0 right-0 left-0 bottom-0 bg-black/60 w-full h-screen max-h-[100dvh] flex justify-center z-[50000] overflow-hidden overscroll-contain"
+		in:fade={{ duration: 10 }}
+		on:mousedown={() => { showMultiMatchModal = false; }}
+	>
+		<div
+			class="m-auto max-w-full w-[48rem] mx-2 bg-white/95 dark:bg-gray-950/95 backdrop-blur-sm rounded-4xl max-h-[90dvh] shadow-3xl border border-white dark:border-gray-900 overflow-y-auto"
+			in:flyAndScale
+			on:mousedown={(e) => { e.stopPropagation(); }}
+		>
+			<div class="px-[1.75rem] py-6 flex flex-col">
+				<div class="text-lg font-medium dark:text-gray-200 mb-2">
+					{$i18n.t('Match Multiple Bank Lines to Entry(s)')}
+				</div>
+				<div class="text-xs text-gray-500 mb-4">
+					{selectedBslIds.size} {$i18n.t('bank statement line(s)')} — {$i18n.t('Total')}: <strong class="font-mono">{fmt(selectedBslTotal)}</strong>
+				</div>
+
+				<!-- Allocation summary -->
+				{#if multiMatchAllocations.size > 0}
+					<div class="mb-3 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg flex items-center justify-between text-xs">
+						<div class="flex gap-4">
+							<span>{$i18n.t('BSL Total')}: <strong class="font-mono">{fmt(selectedBslTotal)}</strong></span>
+							<span>{$i18n.t('Allocated')}: <strong class="font-mono text-green-600">{fmt(multiMatchAllocTotal)}</strong></span>
+							<span>{$i18n.t('Remaining')}: <strong class="font-mono {multiMatchRemaining < 0.01 ? 'text-green-600' : 'text-orange-600'}">{fmt(multiMatchRemaining)}</strong></span>
+						</div>
+					</div>
+				{/if}
+
+				{#if multiMatchLoading}
+					<div class="flex justify-center py-8"><Spinner className="size-5" /></div>
+				{:else if multiMatchInvoices.length === 0}
+					<div class="text-xs text-gray-400 italic text-center py-8">{$i18n.t('No posted entries found.')}</div>
+				{:else}
+					<div class="overflow-x-auto max-h-80 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 mb-4">
+						<table class="w-full text-xs">
+							<thead class="text-[10px] uppercase bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 sticky top-0">
+								<tr>
+									<th class="px-2 py-1.5 w-8"></th>
+									<th class="px-2 py-1.5 text-left">#</th>
+									<th class="px-2 py-1.5 text-left">{$i18n.t('Date')}</th>
+									<th class="px-2 py-1.5 text-left">{$i18n.t('Type')}</th>
+									<th class="px-2 py-1.5 text-left">{$i18n.t('Reference')}</th>
+									<th class="px-2 py-1.5 text-left">{$i18n.t('Description')}</th>
+									<th class="px-2 py-1.5 text-right">{$i18n.t('Amount')}</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each multiMatchInvoices as txn}
+									{@const isSelected = multiMatchAllocations.has(txn.id)}
+									<tr class="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-850 transition {isSelected ? 'bg-blue-50/50 dark:bg-blue-900/20' : ''}">
+										<td class="px-2 py-1.5">
+											<input
+												type="checkbox"
+												class="rounded border-gray-300 dark:border-gray-600"
+												checked={isSelected}
+												on:change={() => toggleMultiMatchEntry(txn)}
+											/>
+										</td>
+										<td class="px-2 py-1.5 font-mono text-gray-400">{txn.id}</td>
+										<td class="px-2 py-1.5 font-mono">{txn.transaction_date ?? '—'}</td>
+										<td class="px-2 py-1.5">
+											<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">{txn.transaction_type ?? '—'}</span>
+										</td>
+										<td class="px-2 py-1.5 font-mono">{txn.reference ?? '—'}</td>
+										<td class="px-2 py-1.5 max-w-[200px] truncate" title={txn.description ?? ''}>{txn.description ?? '—'}</td>
+										<td class="px-2 py-1.5 text-right font-mono font-medium">{fmt(txn._totalAmount ?? 0)}</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+
+				<div class="mt-2 flex justify-between gap-1.5">
+					<button
+						class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white font-medium w-full py-2 rounded-3xl transition"
+						on:click={() => { showMultiMatchModal = false; }}
+						type="button"
+					>
+						{$i18n.t('Cancel')}
+					</button>
+					<button
+						class="text-sm bg-gray-900 hover:bg-gray-850 text-gray-100 dark:bg-gray-100 dark:hover:bg-white dark:text-gray-800 font-medium w-full py-2 rounded-3xl transition disabled:opacity-50"
+						on:click={handleMultiMatchCreate}
+						type="button"
+						disabled={multiMatchAllocations.size === 0 || multiMatchCreating}
+					>
+						{#if multiMatchCreating}
+							{$i18n.t('Creating...')}
+						{:else}
+							{$i18n.t('Create Match Group')}
+						{/if}
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+{/if}
+
+<PaymentFormModal
+	bind:show={showPaymentModal}
+	{accounts}
+	{companyId}
+	prefill={paymentPrefill}
+	on:save={handlePaymentSaved}
+/>

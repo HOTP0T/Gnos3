@@ -341,6 +341,7 @@
 					class="text-xs text-gray-900 dark:text-gray-100 font-bold uppercase bg-gray-100 dark:bg-gray-800"
 				>
 					<tr class="border-b-[1.5px] border-gray-200 dark:border-gray-700">
+						<th scope="col" class="px-2.5 py-2 whitespace-nowrap">{$i18n.t('#')}</th>
 						<th scope="col" class="px-2.5 py-2 whitespace-nowrap">{$i18n.t('Date')}</th>
 						<th scope="col" class="px-2.5 py-2 whitespace-nowrap">{$i18n.t('Direction')}</th>
 						<th scope="col" class="px-2.5 py-2 whitespace-nowrap text-right">{$i18n.t('Amount')}</th>
@@ -357,6 +358,10 @@
 						<tr
 							class="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-850 text-xs hover:bg-gray-50 dark:hover:bg-gray-850/50 transition"
 						>
+							<!-- # -->
+							<td class="px-3 py-1.5 whitespace-nowrap text-gray-400 font-mono text-[10px]">
+								{payment.id}
+							</td>
 							<!-- Date -->
 							<td class="px-3 py-1.5 whitespace-nowrap">
 								{formatDate(payment.payment_date)}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { getTrialBalance, getPeriods } from '$lib/apis/accounting';
+	import { getTrialBalance, getPeriods, exportTrialBalance } from '$lib/apis/accounting';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
@@ -144,6 +144,23 @@
 			disabled={!manualMode && !selectedMonth}
 			on:click={load}
 		>{$i18n.t('Generate')}</button>
+		{#if data}
+			<button
+				class="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1.5"
+				on:click={() => {
+					const opt = monthOptions.find(o => o.value === selectedMonth);
+					exportTrialBalance({
+						company_id: companyId,
+						as_of: manualMode ? manualAsOf : opt?.to,
+						period_start: manualMode ? manualPeriodStart : opt?.from,
+						ytd_start: manualMode ? manualYtdStart : opt?.fiscalStart
+					});
+				}}
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+				{$i18n.t('Export Excel')}
+			</button>
+		{/if}
 		<button
 			class="px-3 py-1.5 text-xs rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-850 transition"
 			on:click={() => { manualMode = !manualMode; }}
@@ -180,18 +197,18 @@
 				</thead>
 				<tbody>
 					{#each data.rows as row}
-						<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
+						<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30 {row.is_parent ? 'bg-gray-50/80 dark:bg-gray-850/40 font-semibold' : ''}">
 							{#if data.period_label}<td class="px-2 py-1.5">{data.period_label}</td>{/if}
-							<td class="px-2 py-1.5 font-mono">{row.account_code}</td>
+							<td class="px-2 py-1.5 font-mono" style="padding-left: {8 + (row.level || 0) * 16}px">{row.account_code}</td>
 							<td class="px-2 py-1.5">{row.account_name}</td>
-														<td class="px-2 py-1.5 text-right font-mono">{fmt(row.opening_debit)}</td>
+							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.opening_debit)}</td>
 							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.opening_credit)}</td>
 							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.movement_debit)}</td>
 							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.movement_credit)}</td>
 							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.accumulated_debit)}</td>
 							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.accumulated_credit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.ending_debit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.ending_credit)}</td>
+							<td class="px-2 py-1.5 text-right font-mono {row.ending_debit ? 'text-blue-700 dark:text-blue-400' : ''}">{fmt(row.ending_debit)}</td>
+							<td class="px-2 py-1.5 text-right font-mono {row.ending_credit ? 'text-red-700 dark:text-red-400' : ''}">{fmt(row.ending_credit)}</td>
 						</tr>
 					{/each}
 				</tbody>

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { getProfitLoss, getPeriods, getCompany } from '$lib/apis/accounting';
+	import { getProfitLoss, getPeriods, getCompany, exportProfitLoss } from '$lib/apis/accounting';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
@@ -325,6 +325,18 @@
 			disabled={!selectedMonth}
 			on:click={load}
 		>{$i18n.t('Generate')}</button>
+		{#if structured}
+			<button
+				class="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1.5"
+				on:click={() => {
+					const opt = monthOptions.find(o => o.value === selectedMonth);
+					if (opt) exportProfitLoss({ company_id: companyId, date_from: opt.from, date_to: opt.to, ytd_start: opt.fiscalStart });
+				}}
+			>
+				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+				{$i18n.t('Export Excel')}
+			</button>
+		{/if}
 	</div>
 
 	{#if loading}

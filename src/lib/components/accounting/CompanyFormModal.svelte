@@ -256,13 +256,13 @@
 							for="company-name"
 							class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
 						>
-							{$i18n.t('Name')} <span class="text-red-500">*</span>
+							{$i18n.t('Legal Entity Name')} <span class="text-red-500">*</span>
 						</label>
 						<input
 							id="company-name"
 							type="text"
 							bind:value={name}
-							placeholder={$i18n.t('e.g. Acme Corp')}
+							placeholder={$i18n.t('name as appears on legal documents')}
 							class="w-full rounded-lg px-4 py-2 text-sm dark:text-gray-300 dark:bg-gray-900 bg-gray-50 outline-hidden border border-gray-200 dark:border-gray-800 focus:border-blue-500 transition"
 							required
 						/>

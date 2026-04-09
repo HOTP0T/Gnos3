@@ -148,13 +148,13 @@
 				data.credit_account_id = credit_account_id;
 			}
 
-			await createPayment(data, companyId);
+			await createPayment(data, companyId, prefill?._bank_statement_line_id);
 			toast.success($i18n.t('Payment recorded'));
 			show = false;
 			await tick();
 			dispatch('save');
-		} catch (err) {
-			toast.error(`${$i18n.t('Failed to record payment')}: ${err}`);
+		} catch (err: any) {
+			toast.error(`${$i18n.t('Failed to record payment')}: ${err?.detail ?? err}`);
 		}
 		saving = false;
 	};

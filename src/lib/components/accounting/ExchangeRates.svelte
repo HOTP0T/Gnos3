@@ -8,7 +8,9 @@
 		createExchangeRate,
 		deleteExchangeRate,
 		bulkImportExchangeRates,
-		downloadExchangeRateTemplate
+		downloadExchangeRateTemplate,
+		getCompany,
+		updateCompany
 	} from '$lib/apis/accounting';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -40,6 +42,28 @@
 	// State
 	let loading = true;
 	let rates: any[] = [];
+
+	// Auto-fetch toggle
+	let autoFetchRates = false;
+	let rateSource = 'exchangerate';
+	let savingToggle = false;
+
+	const loadCompanySettings = async () => {
+		try {
+			const company = await getCompany(companyId);
+			autoFetchRates = company?.auto_fetch_rates ?? false;
+			rateSource = company?.rate_source || 'exchangerate';
+		} catch {}
+	};
+
+	const toggleAutoFetch = async () => {
+		savingToggle = true;
+		try {
+			await updateCompany(companyId, { auto_fetch_rates: autoFetchRates, rate_source: rateSource });
+			toast.success(autoFetchRates ? $i18n.t('Auto-fetch enabled') : $i18n.t('Auto-fetch disabled'));
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+		savingToggle = false;
+	};
 
 	// Create form
 	let showAddForm = false;
@@ -215,6 +239,7 @@
 
 	onMount(() => {
 		loadRates();
+		loadCompanySettings();
 	});
 </script>
 
@@ -275,6 +300,31 @@
 		{$i18n.t(
 			'Monthly exchange rates for converting foreign currency transactions to your company currency.'
 		)}
+	</div>
+
+	<!-- Auto-Fetch Toggle -->
+	<div class="flex items-center gap-3 mb-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-850/50 rounded-xl border border-gray-100 dark:border-gray-800">
+		<label class="flex items-center gap-2 cursor-pointer">
+			<input
+				type="checkbox"
+				bind:checked={autoFetchRates}
+				on:change={toggleAutoFetch}
+				disabled={savingToggle}
+				class="rounded"
+			/>
+			<span class="text-sm dark:text-gray-200">{$i18n.t('Auto-fetch daily rates')}</span>
+		</label>
+		{#if autoFetchRates}
+			<select
+				bind:value={rateSource}
+				on:change={toggleAutoFetch}
+				class="text-xs rounded-lg px-2 py-1 border border-gray-200 dark:border-gray-700 bg-transparent dark:text-gray-300"
+			>
+				<option value="exchangerate">exchangerate.host</option>
+				<option value="ecb">ECB (EUR base only)</option>
+			</select>
+			<span class="text-[10px] text-gray-400 dark:text-gray-500">{$i18n.t('Manual rates are never overwritten')}</span>
+		{/if}
 	</div>
 
 	<!-- Add Rate Form -->
@@ -426,6 +476,12 @@
 										class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-500/20 dark:text-purple-200"
 									>
 										{$i18n.t('Manual')}
+									</span>
+								{:else if rate.source === 'ecb' || rate.source === 'exchangerate'}
+									<span
+										class="inline-block px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200"
+									>
+										{$i18n.t('Auto')}
 									</span>
 								{:else}
 									<span

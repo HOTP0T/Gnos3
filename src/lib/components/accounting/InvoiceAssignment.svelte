@@ -12,15 +12,13 @@
 		bulkUnassignInvoices,
 		confirmInvoiceCategory,
 		getAccounts,
-		getBankAccounts,
-		getBankStatements,
-		matchBankStatement,
-		getTransactions
+		getAccountingAiStatus,
+		aiCategorizeInvoice,
+		aiCategorizeAll
 	} from '$lib/apis/accounting';
 	import { INVOICE_API_BASE_URL, K4MI_BASE_URL } from '$lib/constants';
 	import { convertAmount } from '$lib/utils/currency';
 	import Spinner from '$lib/components/common/Spinner.svelte';
-	import PaymentFormModal from '$lib/components/accounting/PaymentFormModal.svelte';
 	import DocumentPreviewModal from '$lib/components/invoices/DocumentPreviewModal.svelte';
 
 	const i18n = getContext('i18n');
@@ -31,6 +29,8 @@
 	export let companyId: number;
 
 	let loading = true;
+	let aiAvailable = false;
+	let aiCategorizing = false;
 	let companyInvoices: any[] = [];
 	let companyTotal = 0;
 	let unassignedInvoices: any[] = [];
@@ -139,134 +139,45 @@
 		}
 	};
 
-	// Payment modal state
-	let showPaymentModal = false;
-	let paymentPrefill: any = null;
-
-	// Bank reconciliation state for pay-and-match flow
-	let bankMatchCandidates: any[] = [];
-	let bankMatchLoading = false;
-	let selectedBankLineId: number | null = null;
-	let paymentInvoiceId: number | null = null;
-
-	const suggestPayment = async (inv: any) => {
-		const isSale = (inv.vendor_name || '').toLowerCase().includes('ma soci');
-		paymentPrefill = {
-			payment_date: new Date().toISOString().slice(0, 10),
-			amount: parseFloat(inv.total_amount) || 0,
-			currency: inv.currency || 'EUR',
-			direction: isSale ? 'inbound' : 'outbound',
-			method: 'bank_transfer',
-			payer: isSale ? (inv.client_name || '') : '',
-			payee: isSale ? '' : (inv.vendor_name || ''),
-			reference: `PAY-${inv.invoice_number || inv.id}`,
-			invoice_id: inv.id
-		};
-		paymentInvoiceId = inv.id;
-		selectedBankLineId = null;
-		bankMatchCandidates = [];
-		showPaymentModal = true;
-
-		// Fetch unmatched bank lines that could match this payment amount
-		bankMatchLoading = true;
-		try {
-			const bankAccts = await getBankAccounts(companyId) ?? [];
-			if (bankAccts.length > 0) {
-				const allLines: any[] = [];
-				for (const ba of bankAccts) {
-					const lines = await getBankStatements(ba.id, { status: 'unmatched' }) ?? [];
-					for (const line of lines) {
-						line._bankAccountName = ba.name;
-						line._bankAccountCurrency = ba.currency || '';
-					}
-					allLines.push(...lines);
-				}
-				// Filter to lines with similar amounts (within 1% tolerance)
-				const targetAmount = Math.abs(parseFloat(inv.total_amount) || 0);
-				if (targetAmount > 0) {
-					const tolerance = targetAmount * 0.01;
-					bankMatchCandidates = allLines.filter((line: any) => {
-						const lineAmount = Math.abs(parseFloat(line.amount) || 0);
-						return Math.abs(lineAmount - targetAmount) <= tolerance;
-					});
-				} else {
-					bankMatchCandidates = [];
-				}
-			}
-		} catch (err) {
-			// Non-blocking: bank match is optional
-			console.warn('Could not fetch bank statements for matching:', err);
-		}
-		bankMatchLoading = false;
-	};
-
-	const selectBankLine = (line: any) => {
-		selectedBankLineId = line.id;
-		// Pre-fill payment date from the bank line date
-		if (paymentPrefill && line.transaction_date) {
-			paymentPrefill = { ...paymentPrefill, payment_date: line.transaction_date };
-		}
-	};
-
-	const deselectBankLine = () => {
-		selectedBankLineId = null;
-		// Reset payment date to today
-		if (paymentPrefill) {
-			paymentPrefill = { ...paymentPrefill, payment_date: new Date().toISOString().slice(0, 10) };
-		}
-	};
-
-	const handlePaymentSaved = async () => {
-		// If a bank line was selected, auto-match it to the payment's transaction
-		if (selectedBankLineId && paymentInvoiceId) {
-			try {
-				// Find the transaction created for this payment (by invoice_id, most recent)
-				const txnRes = await getTransactions({ company_id: companyId, invoice_id: paymentInvoiceId, limit: 1 });
-				const txns = txnRes?.transactions ?? txnRes ?? [];
-				if (Array.isArray(txns) && txns.length > 0) {
-					// Pick the last (most recent) payment-type transaction
-					const paymentTxn = txns.find((t: any) => t.transaction_type === 'payment') ?? txns[0];
-					await matchBankStatement(selectedBankLineId, paymentTxn.id);
-					toast.success($i18n.t('Payment recorded and bank line matched'));
-				}
-			} catch (err) {
-				console.warn('Bank matching failed:', err);
-				toast.error($i18n.t('Payment recorded but bank matching failed'));
-			}
-		}
-		selectedBankLineId = null;
-		bankMatchCandidates = [];
-		paymentInvoiceId = null;
-		await reloadAll();
-	};
-
 	// Account picker state
-	let accountPickerInvoiceId: number | null = null;
+	let pickerInvoiceId: number | null = null;
+	let pickerMainCode = '';
+	let pickerMainSearch = '';
+
+	const openAccountPicker = (inv: any) => {
+		pickerMainCode = inv.final_account_code || inv.suggested_account_code || '';
+		pickerMainSearch = '';
+		pickerInvoiceId = inv.id;
+	};
 
 	const handleConfirmCategory = async (inv: any) => {
-		const code = inv.suggested_account_code;
-		if (!code) return;
-		try {
-			await confirmInvoiceCategory(inv.id, code);
-			toast.success($i18n.t('Account confirmed'));
-			await reloadAll();
-		} catch (err) { toast.error(`${err}`); }
+		openAccountPicker(inv);
 	};
 
-	const handleManualAccountSelect = async (invoiceId: number, accountCode: string) => {
-		if (!accountCode) return;
+	const closePicker = () => {
+		pickerInvoiceId = null;
+		pickerMainCode = '';
+	};
+
+	const handleConfirmPicker = async () => {
+		if (!pickerInvoiceId || !pickerMainCode) {
+			toast.error($i18n.t('Please select an account'));
+			return;
+		}
+		const invoiceId = pickerInvoiceId;
+		const mainCode = pickerMainCode;
+		closePicker();
 		aiProcessingIds.add(invoiceId);
 		aiProcessingIds = aiProcessingIds;
-		aiActivity = $i18n.t('AI is creating journal entry...');
+		aiActivity = $i18n.t('Creating draft entry...');
 		try {
-			const result = await confirmInvoiceCategory(invoiceId, accountCode);
+			const result = await confirmInvoiceCategory(invoiceId, mainCode);
 			const txnId = result?.transaction_id;
 			if (txnId) {
-				toast.success($i18n.t('Account confirmed — Draft entry') + ` #${txnId} ` + $i18n.t('created'));
+				toast.success($i18n.t('Draft entry') + ` #${txnId} ` + $i18n.t('created'));
 			} else {
 				toast.success($i18n.t('Account confirmed'));
 			}
-			accountPickerInvoiceId = null;
 			await reloadAll();
 		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 		aiProcessingIds.delete(invoiceId);
@@ -480,7 +391,41 @@
 		return currentDir === 'asc' ? ' \u25B2' : ' \u25BC';
 	};
 
-	onMount(async () => { await Promise.all([loadCompanyInvoices(), loadAccounts(), loadUnassignedInvoices()]); loading = false; });
+	async function handleAiCategorizeAll() {
+		aiCategorizing = true;
+		try {
+			const result = await aiCategorizeAll(companyId);
+			toast.success($i18n.t(`AI categorized ${result.categorized} of ${result.total_invoices} invoice(s)`));
+			await loadCompanyInvoices();
+		} catch (e) {
+			toast.error($i18n.t('AI categorization failed'));
+		} finally {
+			aiCategorizing = false;
+		}
+	}
+
+	async function handleAiCategorizeOne(invoiceId: number) {
+		try {
+			const result = await aiCategorizeInvoice(invoiceId);
+			if (result.status === 'suggested') {
+				toast.success($i18n.t(`AI suggests: ${result.account_code} (${result.reasoning})`));
+				await loadCompanyInvoices();
+			} else {
+				toast.info($i18n.t('AI could not determine account'));
+			}
+		} catch (e) {
+			toast.error($i18n.t('AI categorization failed'));
+		}
+	}
+
+	onMount(async () => {
+		await Promise.all([loadCompanyInvoices(), loadAccounts(), loadUnassignedInvoices()]);
+		loading = false;
+		// Non-blocking AI status check
+		getAccountingAiStatus()
+			.then((s) => (aiAvailable = s.available))
+			.catch(() => (aiAvailable = false));
+	});
 </script>
 
 {#if loading}
@@ -498,7 +443,7 @@
 		<!-- Stats -->
 		<div class="grid grid-cols-3 gap-3">
 			<div class="bg-white dark:bg-gray-900 rounded-xl p-3 border border-gray-100/30 dark:border-gray-850/30">
-				<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Company Invoices')}</div>
+				<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Invoice Treatment')}</div>
 				<div class="text-xl font-medium dark:text-gray-200">{companyTotal}</div>
 			</div>
 			<div class="bg-white dark:bg-gray-900 rounded-xl p-3 border border-gray-100/30 dark:border-gray-850/30">
@@ -528,7 +473,7 @@
 		<!-- Company Invoices Panel -->
 		<div class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30">
 			<div class="flex justify-between items-center mb-3 gap-2 flex-wrap">
-				<div class="text-sm font-medium dark:text-gray-200">{$i18n.t('Company Invoices')}</div>
+				<div class="text-sm font-medium dark:text-gray-200">{$i18n.t('Invoice Treatment')}</div>
 				<div class="flex items-center gap-2">
 					<!-- Review filter -->
 					<select bind:value={filterReview} class="text-xs rounded-lg px-2 py-1 border border-gray-200 dark:border-gray-700 bg-transparent dark:text-gray-300">
@@ -604,6 +549,23 @@
 				</div>
 			{/if}
 
+			<!-- AI Categorize All -->
+			{#if aiAvailable && companyInvoices.some((i) => !i.final_account_code)}
+				<div class="flex items-center gap-2 mb-2">
+					<button
+						class="px-3 py-1.5 text-xs rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition disabled:opacity-50 flex items-center gap-1.5"
+						disabled={aiCategorizing}
+						on:click={handleAiCategorizeAll}
+					>
+						{#if aiCategorizing}
+							<Spinner className="size-3" />
+						{/if}
+						{$i18n.t('AI Categorize All')}
+					</button>
+					<span class="text-[10px] text-gray-400">{$i18n.t('CPA-Qwen3 will suggest accounts for uncategorized invoices')}</span>
+				</div>
+			{/if}
+
 			{#if filteredCompany.length === 0}
 				<div class="text-center text-sm text-gray-500 py-6">{$i18n.t('No invoices assigned to this company')}</div>
 			{:else}
@@ -652,24 +614,18 @@
 										{#if inv.needs_review}<span class="text-yellow-600 dark:text-yellow-400 font-medium">Review</span>
 										{:else}<span class="text-green-600 dark:text-green-400">Ready</span>{/if}
 									</td>
-									<td class="px-2 py-1.5 relative" on:click|stopPropagation>
-										{#if accountPickerInvoiceId === inv.id}
-											<select
-												class="text-[10px] w-36 rounded px-1 py-0.5 border border-blue-400 bg-white dark:bg-gray-900 dark:text-gray-200 outline-none"
-												on:change={(e) => handleManualAccountSelect(inv.id, e.currentTarget.value)}
-												on:blur={() => { accountPickerInvoiceId = null; }}
-											>
-												<option value="">{$i18n.t('Select account...')}</option>
-												{#each accountsList as acct}
-													<option value={acct.code}>{acct.code} — {acct.name}</option>
-												{/each}
-											</select>
-										{:else if inv.final_account_code}
-											<button class="text-[10px] px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50 transition cursor-pointer" title="{accountLabel(inv.final_account_code)} — {$i18n.t('click to change')}" on:click={() => { accountPickerInvoiceId = inv.id; }}>{inv.final_account_code}</button>
+									<td class="px-2 py-1.5" on:click|stopPropagation>
+										{#if inv.final_account_code}
+											<button class="text-[10px] px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50 transition cursor-pointer" title="{accountLabel(inv.final_account_code)} — {$i18n.t('click to change')}" on:click={() => openAccountPicker(inv)}>{inv.final_account_code}</button>
 										{:else if inv.suggested_account_code}
-											<button class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-800/50 transition" title="{$i18n.t('AI suggestion')}: {accountLabel(inv.suggested_account_code)}" on:click={() => { accountPickerInvoiceId = inv.id; }}>{inv.suggested_account_code} ?</button>
+											<button class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-800/50 transition" title="{$i18n.t('AI suggestion')}: {accountLabel(inv.suggested_account_code)}" on:click={() => openAccountPicker(inv)}>{inv.suggested_account_code} ?</button>
 										{:else}
-											<button class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition cursor-pointer" title={$i18n.t('Click to assign account')} on:click={() => { accountPickerInvoiceId = inv.id; }}>{$i18n.t('Assign')}</button>
+											<span class="inline-flex gap-1">
+												<button class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition cursor-pointer" title={$i18n.t('Click to assign account')} on:click={() => openAccountPicker(inv)}>{$i18n.t('Assign')}</button>
+												{#if aiAvailable}
+													<button class="text-[10px] px-1 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 hover:bg-purple-200 dark:hover:bg-purple-800/50 transition" title={$i18n.t('AI categorize')} on:click={() => handleAiCategorizeOne(inv.id)}>AI</button>
+												{/if}
+											</span>
 										{/if}
 									</td>
 									<td class="px-2 py-1.5" on:click|stopPropagation>
@@ -681,13 +637,11 @@
 											<span class="text-gray-300 dark:text-gray-600 text-[10px]">—</span>
 										{/if}
 									</td>
-									<td class="px-2 py-1.5" on:click|stopPropagation>
+									<td class="px-2 py-1.5">
 									{#if inv.payment_status === 'paid'}
 										<span class="text-[10px] px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{$i18n.t('Paid')}</span>
 									{:else if inv.transaction_id}
-										<button class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-800/50 transition" on:click={() => suggestPayment(inv)}>
-											{$i18n.t('Pay')}
-										</button>
+										<span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">{$i18n.t('Unpaid')}</span>
 									{:else}
 										<span class="text-gray-300 dark:text-gray-600 text-[10px]">—</span>
 									{/if}
@@ -709,6 +663,49 @@
 								{#if expandedId === inv.id}
 									<tr class="bg-gray-50/50 dark:bg-gray-850/30">
 										<td colspan="12" class="px-4 py-3 text-xs">
+										<!-- Journal Entry Summary -->
+										{#if inv.transaction_lines?.length > 0}
+											<div class="mb-3 p-2.5 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
+												<div class="text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1.5 flex items-center gap-2">
+													{$i18n.t('Journal Entry')}
+													{#if inv.transaction_id}
+														<span class="text-[9px] px-1.5 py-0.5 rounded {inv.transaction_status === 'posted' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'}">
+															#{inv.transaction_id} — {inv.transaction_status}
+														</span>
+													{/if}
+												</div>
+												<table class="w-full text-[10px]">
+													<thead>
+														<tr class="text-gray-500 dark:text-gray-400">
+															<th class="text-left py-0.5 pr-2">{$i18n.t('Account')}</th>
+															<th class="text-left py-0.5 pr-2">{$i18n.t('Name')}</th>
+															<th class="text-right py-0.5 px-2">{$i18n.t('Debit')}</th>
+															<th class="text-right py-0.5 px-2">{$i18n.t('Credit')}</th>
+														</tr>
+													</thead>
+													<tbody>
+														{#each inv.transaction_lines as line}
+															<tr class="border-t border-gray-100 dark:border-gray-800">
+																<td class="py-1 pr-2 font-mono font-medium dark:text-gray-200">{line.account_code}</td>
+																<td class="py-1 pr-2 text-gray-600 dark:text-gray-400">{line.account_name}</td>
+																<td class="py-1 px-2 text-right font-mono {line.debit > 0 ? 'dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'}">
+																	{line.debit > 0 ? line.debit.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : ''}
+																</td>
+																<td class="py-1 px-2 text-right font-mono {line.credit > 0 ? 'dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'}">
+																	{line.credit > 0 ? line.credit.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : ''}
+																</td>
+															</tr>
+														{/each}
+													</tbody>
+												</table>
+											</div>
+										{:else if inv.final_account_code && !inv.transaction_id}
+											<div class="mb-3 p-2 bg-amber-50 dark:bg-amber-900/10 rounded-lg border border-amber-200 dark:border-amber-800/30 text-[10px] text-amber-700 dark:text-amber-400">
+												{$i18n.t('Account assigned — create a journal entry in the Entries tab to complete the double-entry.')}
+											</div>
+										{/if}
+
+										<!-- Invoice Fields -->
 										<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
 											<div>
 												<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{$i18n.t('Vendor')}</label>
@@ -906,64 +903,72 @@
 		{/if}
 	</div>
 
-	<!-- Bank Match Panel (shown above PaymentFormModal when paying an invoice) -->
-	{#if showPaymentModal}
-		<div class="fixed inset-0 z-[50001] flex items-start justify-center pt-[5vh] pointer-events-none">
-			<div class="pointer-events-auto w-full max-w-lg mx-4 mb-2">
-				{#if bankMatchLoading}
-					<div class="bg-white dark:bg-gray-900 rounded-xl border border-blue-200 dark:border-blue-800/50 p-3 shadow-lg flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-						<Spinner className="size-4" />
-						<span>{$i18n.t('Searching for matching bank statement lines...')}</span>
-					</div>
-				{:else if bankMatchCandidates.length > 0}
-					<div class="bg-white dark:bg-gray-900 rounded-xl border border-blue-200 dark:border-blue-800/50 p-3 shadow-lg space-y-2">
-						<div class="text-xs font-medium text-gray-700 dark:text-gray-300">{$i18n.t('Match with bank statement line:')}</div>
-						<div class="space-y-1 max-h-40 overflow-y-auto">
-							{#each bankMatchCandidates as line}
-								<button
-									class="w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2 transition {selectedBankLineId === line.id ? 'bg-blue-100 dark:bg-blue-900/40 border border-blue-400 dark:border-blue-600' : 'bg-gray-50 dark:bg-gray-850 hover:bg-gray-100 dark:hover:bg-gray-800 border border-transparent'}"
-									on:click={() => selectedBankLineId === line.id ? deselectBankLine() : selectBankLine(line)}
-								>
-									<div class="flex items-center gap-3 min-w-0">
-										<span class="text-gray-500 dark:text-gray-400 whitespace-nowrap">{line.transaction_date}</span>
-										<span class="truncate text-gray-700 dark:text-gray-300">{line.description ?? '—'}</span>
-										{#if line._bankAccountName}
-											<span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 whitespace-nowrap">{line._bankAccountName}</span>
-										{/if}
-									</div>
-									<span class="font-mono whitespace-nowrap {parseFloat(line.amount) < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}">
-										{parseFloat(line.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-										{#if line._bankAccountCurrency}
-											<span class="text-gray-400 dark:text-gray-500 text-[10px] ml-0.5">{line._bankAccountCurrency}</span>
-										{/if}
-									</span>
-								</button>
-							{/each}
-						</div>
-						{#if selectedBankLineId}
-							<div class="text-[10px] text-blue-600 dark:text-blue-400">{$i18n.t('Bank line selected — will be auto-matched after payment is saved')}</div>
-						{/if}
-					</div>
-				{:else if !bankMatchLoading}
-					<div class="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-3 shadow-lg text-xs text-gray-500 dark:text-gray-400 italic">
-						{$i18n.t('No matching bank lines found — record payment manually')}
-					</div>
-				{/if}
-			</div>
-		</div>
-	{/if}
-
-	<PaymentFormModal
-		bind:show={showPaymentModal}
-		accounts={[]}
-		{companyId}
-		prefill={paymentPrefill}
-		on:save={handlePaymentSaved}
-	/>
-
 	<DocumentPreviewModal
 		bind:show={showPreview}
 		invoice={previewInvoice}
 		onUpdate={handlePreviewUpdate}
 	/>
+{/if}
+
+<!-- Account Picker Modal — MUST be outside the {#if loading}{:else} block to avoid re-renders -->
+{#if pickerInvoiceId !== null}
+	<!-- svelte-ignore a11y-click-events-have-key-events -->
+	<!-- svelte-ignore a11y-no-static-element-interactions -->
+	<div
+		class="fixed inset-0 bg-black/40 z-[50000] flex items-center justify-center"
+		on:mousedown={closePicker}
+	>
+		<!-- svelte-ignore a11y-click-events-have-key-events -->
+		<!-- svelte-ignore a11y-no-static-element-interactions -->
+		<div
+			class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl p-5 w-96 space-y-3"
+			on:mousedown|stopPropagation
+		>
+			<div class="text-sm font-medium dark:text-gray-200">{$i18n.t('Assign Account')}</div>
+
+			<div>
+				<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Expense / Revenue Account')}</label>
+				{#if pickerMainCode}
+					<div class="flex items-center gap-2">
+						<span class="flex-1 text-sm px-3 py-2 rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 dark:text-gray-200 font-mono">
+							{pickerMainCode} — {accountMap[pickerMainCode] || ''}
+						</span>
+						<button class="text-[10px] text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap" on:click={() => { pickerMainCode = ''; }}>{$i18n.t('Change')}</button>
+					</div>
+				{:else}
+					<input
+						type="text"
+						placeholder={$i18n.t('Search accounts...')}
+						class="w-full text-sm rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 outline-hidden focus:border-blue-500 transition mb-1"
+						on:input={(e) => { pickerMainSearch = e.currentTarget.value; }}
+					/>
+					<div class="max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+						{#each accountsList.filter(a => !pickerMainSearch || a.code.includes(pickerMainSearch) || a.name.toLowerCase().includes(pickerMainSearch.toLowerCase())) as acct}
+							<button
+								class="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/20 transition border-b border-gray-100 dark:border-gray-800 last:border-b-0"
+								on:click={() => { pickerMainCode = acct.code; }}
+							>
+								<span class="font-mono font-medium">{acct.code}</span>
+								<span class="text-gray-500 dark:text-gray-400 ml-1">{acct.name}</span>
+							</button>
+						{/each}
+					</div>
+				{/if}
+			</div>
+
+			<p class="text-[10px] text-gray-400 dark:text-gray-500">{$i18n.t('Add the counterparty (AP/AR) later in the Entries tab.')}</p>
+
+			<div class="flex gap-2 pt-1">
+				<button
+					class="flex-1 text-sm px-3 py-2 rounded-xl bg-gray-900 hover:bg-gray-850 text-white dark:bg-gray-100 dark:hover:bg-white dark:text-gray-800 font-medium transition disabled:opacity-50"
+					disabled={!pickerMainCode}
+					on:click={handleConfirmPicker}
+				>{$i18n.t('Confirm & Create Draft')}</button>
+				<button
+					class="text-sm px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-300 font-medium transition"
+					on:click={closePicker}
+				>{$i18n.t('Cancel')}</button>
+			</div>
+		</div>
+	</div>
 {/if}

@@ -11,7 +11,11 @@
 		deleteTransaction,
 		postTransaction,
 		voidTransaction,
-		getAccounts
+		getAccounts,
+		bulkPostTransactions,
+		bulkDeleteDrafts,
+		getAccountingAiStatus,
+		aiValidateTransaction
 	} from '$lib/apis/accounting';
 	import { getInvoice } from '$lib/apis/invoices';
 	import { convertAmount } from '$lib/utils/currency';
@@ -45,11 +49,52 @@
 	let filterStatus = '';
 	let filterDateFrom = '';
 	let filterDateTo = '';
+	let filterUnbalanced = false;
 	let searchQuery = '';
 	let searchDebounce: ReturnType<typeof setTimeout>;
 
 	// ─── Expanded rows ───────────────────────────────────────────────────────────
 	let expandedRows: Set<number> = new Set();
+
+	// ─── AI validation ───────────────────────────────────────────────────────────
+	let aiAvailable = false;
+	let validatingId: number | null = null;
+
+	// ─── Bulk selection ──────────────────────────────────────────────────────────
+	let selectedIds: Set<number> = new Set();
+	$: filteredTransactions = filterUnbalanced ? transactions.filter((t) => isUnbalanced(t)) : transactions;
+	$: draftTransactions = filteredTransactions.filter((t) => t.status === 'draft');
+	$: allDraftsSelected = draftTransactions.length > 0 && draftTransactions.every((t) => selectedIds.has(t.id));
+
+	const toggleSelectAll = () => {
+		if (allDraftsSelected) selectedIds = new Set();
+		else selectedIds = new Set(draftTransactions.map((t) => t.id));
+	};
+	const toggleSelect = (id: number) => {
+		if (selectedIds.has(id)) selectedIds.delete(id);
+		else selectedIds.add(id);
+		selectedIds = selectedIds;
+	};
+
+	const handleBulkPost = async () => {
+		if (selectedIds.size === 0) return;
+		try {
+			const result = await bulkPostTransactions({ company_id: companyId });
+			toast.success(`${result?.posted ?? 0} ${$i18n.t('entries posted')}`);
+			selectedIds = new Set();
+			await loadTransactions();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+	};
+
+	const handleBulkDelete = async () => {
+		if (selectedIds.size === 0) return;
+		try {
+			const result = await bulkDeleteDrafts(companyId, [...selectedIds]);
+			toast.success(`${result?.deleted ?? 0} ${$i18n.t('drafts deleted')}`);
+			selectedIds = new Set();
+			await loadTransactions();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+	};
 
 	// ─── Modal state ─────────────────────────────────────────────────────────────
 	let showFormModal = false;
@@ -92,8 +137,23 @@
 	const TYPE_CLASSES: Record<string, string> = {
 		invoice: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
 		bill: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300',
+		payment_in: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300',
+		payment_out: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300',
+		others: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
 		payment: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300',
-		journal: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+		journal: 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
+		adjustment: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-300'
+	};
+
+	const TYPE_LABELS: Record<string, string> = {
+		invoice: 'Invoice',
+		bill: 'Bill',
+		payment_in: 'Payment In',
+		payment_out: 'Payment Out',
+		others: 'Others',
+		payment: 'Payment',
+		journal: 'Journal',
+		adjustment: 'Adjustment'
 	};
 
 	// ─── Formatting helpers ──────────────────────────────────────────────────────
@@ -103,6 +163,13 @@
 			minimumFractionDigits: 2,
 			maximumFractionDigits: 2
 		});
+	};
+
+	const isUnbalanced = (txn: any): boolean => {
+		if (!txn.lines || txn.lines.length < 2) return true;
+		const totalDebit = txn.lines.reduce((s: number, l: any) => s + parseFloat(String(l.debit ?? 0)), 0);
+		const totalCredit = txn.lines.reduce((s: number, l: any) => s + parseFloat(String(l.credit ?? 0)), 0);
+		return Math.abs(totalDebit - totalCredit) > 0.005;
 	};
 
 	const formatDate = (val: any) => {
@@ -228,7 +295,7 @@
 			toast.success($i18n.t('Transaction posted'));
 			loadTransactions();
 		} catch (err: any) {
-			toast.error($i18n.t('Failed to post') + ': ' + (err?.detail ?? err));
+			toast.error($i18n.t('Failed to post') + ': ' + (err?.detail ?? err?.message ?? String(err)));
 		}
 		postTarget = null;
 	};
@@ -241,8 +308,13 @@
 	const handleVoid = async () => {
 		if (!voidTarget) return;
 		try {
-			await voidTransaction(voidTarget.id);
-			toast.success($i18n.t('Transaction voided'));
+			const result = await voidTransaction(voidTarget.id);
+			const draftId = result?.correction_draft?.id;
+			if (draftId) {
+				toast.success($i18n.t('Entry voided. Correction draft') + ` #${draftId} ` + $i18n.t('created — edit and re-post when ready.'));
+			} else {
+				toast.success($i18n.t('Transaction voided'));
+			}
 			loadTransactions();
 		} catch (err: any) {
 			toast.error($i18n.t('Failed to void') + ': ' + (err?.detail ?? err));
@@ -282,11 +354,31 @@
 	}
 
 	// ─── Lifecycle ───────────────────────────────────────────────────────────────
+	async function handleAiValidate(txnId: number) {
+		validatingId = txnId;
+		try {
+			const result = await aiValidateTransaction(txnId);
+			if (result.is_valid) {
+				toast.success($i18n.t('Entry is valid'));
+			} else {
+				const msgs = [...result.issues, ...result.warnings].join('; ');
+				toast.warning(msgs || $i18n.t('Issues found'));
+			}
+		} catch {
+			toast.error($i18n.t('AI validation failed'));
+		} finally {
+			validatingId = null;
+		}
+	}
+
 	onMount(() => {
 		loadAccounts();
 		loadTransactions().then(() => {
 			mounted = true;
 		});
+		getAccountingAiStatus()
+			.then((s) => (aiAvailable = s.available))
+			.catch(() => {});
 	});
 </script>
 
@@ -402,8 +494,10 @@
 			<option value="">{$i18n.t('All Types')}</option>
 			<option value="invoice">{$i18n.t('Invoice')}</option>
 			<option value="bill">{$i18n.t('Bill')}</option>
-			<option value="payment">{$i18n.t('Payment')}</option>
-			<option value="journal">{$i18n.t('Journal')}</option>
+			<option value="payment_in">{$i18n.t('Payment In')}</option>
+			<option value="payment_out">{$i18n.t('Payment Out')}</option>
+			<option value="others">{$i18n.t('Others')}</option>
+			<option value="adjustment">{$i18n.t('Adjustment')}</option>
 		</select>
 
 		<!-- Status filter -->
@@ -440,8 +534,18 @@
 			/>
 		</div>
 
+		<!-- Unbalanced filter -->
+		<button
+			class="text-xs px-2.5 py-1.5 rounded-lg border transition {filterUnbalanced
+				? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500 dark:bg-amber-900/30 dark:text-amber-300 font-medium'
+				: 'border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-amber-300 dark:hover:border-amber-600'}"
+			on:click={() => { filterUnbalanced = !filterUnbalanced; }}
+		>
+			{$i18n.t('Unbalanced')}
+		</button>
+
 		<!-- Clear filters -->
-		{#if filterType || filterStatus || filterDateFrom || filterDateTo || searchQuery}
+		{#if filterType || filterStatus || filterDateFrom || filterDateTo || searchQuery || filterUnbalanced}
 			<button
 				class="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 underline"
 				on:click={() => {
@@ -449,6 +553,7 @@
 					filterStatus = '';
 					filterDateFrom = '';
 					filterDateTo = '';
+					filterUnbalanced = false;
 					searchQuery = '';
 					handleFilterChange();
 				}}
@@ -463,17 +568,28 @@
 		<div class="flex justify-center my-10">
 			<Spinner className="size-5" />
 		</div>
-	{:else if transactions.length === 0}
+	{:else if filteredTransactions.length === 0}
 		<div class="flex justify-center my-10 text-sm text-gray-500">
-			{$i18n.t('No transactions found')}
+			{$i18n.t(filterUnbalanced ? 'No unbalanced transactions found' : 'No transactions found')}
 		</div>
 	{:else}
+		<!-- Bulk Action Bar -->
+		{#if selectedIds.size > 0}
+			<div class="flex items-center gap-3 mb-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm">
+				<span class="font-medium text-blue-700 dark:text-blue-300">{selectedIds.size} {$i18n.t('selected')}</span>
+				<button class="px-2 py-0.5 text-xs rounded bg-green-600 text-white hover:bg-green-700 transition" on:click={handleBulkPost}>{$i18n.t('Post Selected')}</button>
+				<button class="px-2 py-0.5 text-xs rounded bg-red-600 text-white hover:bg-red-700 transition" on:click={handleBulkDelete}>{$i18n.t('Delete Selected')}</button>
+				<button class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" on:click={() => { selectedIds = new Set(); }}>{$i18n.t('Clear')}</button>
+			</div>
+		{/if}
+
 		<div class="overflow-x-auto">
 			<table class="w-full text-sm text-left text-gray-900 dark:text-gray-100">
 				<thead
 					class="text-xs text-gray-900 dark:text-gray-100 font-bold uppercase bg-gray-100 dark:bg-gray-800"
 				>
 					<tr class="border-b-[1.5px] border-gray-200 dark:border-gray-700">
+						<th class="px-2 py-2 w-8"><input type="checkbox" checked={allDraftsSelected} on:change={toggleSelectAll} class="rounded" /></th>
 						<th class="px-3 py-2 whitespace-nowrap">{$i18n.t('#')}</th>
 						<th class="px-3 py-2 whitespace-nowrap">{$i18n.t('Date')}</th>
 						<th class="px-3 py-2 whitespace-nowrap">{$i18n.t('Type')}</th>
@@ -486,13 +602,19 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each transactions as txn (txn.id)}
+					{#each filteredTransactions as txn (txn.id)}
 						<!-- Main row -->
 						<tr
 							class="bg-white dark:bg-gray-900 border-b border-gray-100 dark:border-gray-850 text-xs hover:bg-gray-50 dark:hover:bg-gray-850/50 transition cursor-pointer"
 							on:click={() => toggleExpand(txn.id)}
 						>
-							<!-- Transaction # -->
+							<!-- Checkbox -->
+							<td class="px-2 py-2" on:click|stopPropagation>
+								{#if txn.status === 'draft'}
+									<input type="checkbox" checked={selectedIds.has(txn.id)} on:change={() => toggleSelect(txn.id)} class="rounded" />
+								{/if}
+							</td>
+							<!-- Entry # -->
 							<td class="px-3 py-2 whitespace-nowrap text-gray-400 font-mono text-[10px]">
 								{txn.id}
 							</td>
@@ -505,23 +627,36 @@
 							<!-- Type badge -->
 							<td class="px-3 py-2">
 								<span
-									class="inline-block px-2 py-0.5 rounded-lg text-xs font-medium uppercase {TYPE_CLASSES[
+									class="inline-block px-2 py-0.5 rounded-lg text-xs font-medium {TYPE_CLASSES[
 										txn.transaction_type
-									] ?? TYPE_CLASSES.journal}"
+									] ?? TYPE_CLASSES.others}"
 								>
-									{txn.transaction_type}
+									{TYPE_LABELS[txn.transaction_type] ?? txn.transaction_type}
 								</span>
 							</td>
 
 							<!-- Status badge -->
 							<td class="px-3 py-2">
-								<span
-									class="inline-block px-2 py-0.5 rounded-lg text-xs font-medium uppercase {STATUS_CLASSES[
-										txn.status
-									] ?? STATUS_CLASSES.draft}"
-								>
-									{txn.status}
-								</span>
+								<div class="flex items-center gap-1">
+									<span
+										class="inline-block px-2 py-0.5 rounded-lg text-xs font-medium uppercase {STATUS_CLASSES[
+											txn.status
+										] ?? STATUS_CLASSES.draft}"
+									>
+										{txn.status}
+									</span>
+									{#if isUnbalanced(txn)}
+										<Tooltip content={$i18n.t('Missing double entry — debits and credits do not balance')}>
+											<span class="inline-flex text-amber-500">
+												<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+													stroke-width="2" stroke="currentColor" class="size-3.5">
+													<path stroke-linecap="round" stroke-linejoin="round"
+														d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+												</svg>
+											</span>
+										</Tooltip>
+									{/if}
+								</div>
 							</td>
 
 							<!-- Reference -->
@@ -596,6 +731,21 @@
 														stroke-linejoin="round"
 														d="m4.5 12.75 6 6 9-13.5"
 													/>
+												</svg>
+											</button>
+										</Tooltip>
+									{/if}
+
+									<!-- AI Validate (draft only) -->
+									{#if aiAvailable && txn.status === 'draft'}
+										<Tooltip content={$i18n.t('AI Validate')}>
+											<button
+												class="p-1 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-900/20 text-purple-600 dark:text-purple-400 transition disabled:opacity-50"
+												disabled={validatingId === txn.id}
+												on:click={() => handleAiValidate(txn.id)}
+											>
+												<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5">
+													<path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 0 0-2.455 2.456Z" />
 												</svg>
 											</button>
 										</Tooltip>
@@ -807,6 +957,20 @@
 																</td>
 																<td class="py-1 dark:text-gray-300">
 																	{line.description ?? '-'}
+																</td>
+															</tr>
+														{/each}
+														<!-- Totals row -->
+														{#each [{ d: txn.lines.reduce((s, l) => s + parseFloat(String(l.debit ?? 0)), 0), c: txn.lines.reduce((s, l) => s + parseFloat(String(l.credit ?? 0)), 0) }] as totals}
+															{@const unbalanced = Math.abs(totals.d - totals.c) > 0.005}
+															<tr class="border-t border-gray-300 dark:border-gray-600 font-semibold {unbalanced ? 'text-red-600 dark:text-red-400' : 'text-gray-700 dark:text-gray-300'}">
+																<td class="py-1.5 pr-2" colspan="2">{$i18n.t('Total')}</td>
+																<td class="py-1.5 pr-2 text-right">{formatCurrency(totals.d)}</td>
+																<td class="py-1.5 pr-2 text-right">{formatCurrency(totals.c)}</td>
+																<td class="py-1.5">
+																	{#if unbalanced}
+																		<span class="text-red-500 text-[10px]">{$i18n.t('Unbalanced')}: {formatCurrency(Math.abs(totals.d - totals.c))}</span>
+																	{/if}
 																</td>
 															</tr>
 														{/each}

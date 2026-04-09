@@ -5,13 +5,14 @@
 	import TrialBalance from './TrialBalance.svelte';
 	import ProfitLoss from './ProfitLoss.svelte';
 	import BalanceSheet from './BalanceSheet.svelte';
+	import CashFlow from './CashFlow.svelte';
 	import AgingReport from './AgingReport.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let companyId: number;
 
-	type ReportTab = 'general-ledger' | 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'ap-aging' | 'ar-aging';
+	type ReportTab = 'general-ledger' | 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ap-aging' | 'ar-aging';
 
 	let activeReport: ReportTab = 'general-ledger';
 
@@ -20,6 +21,7 @@
 		{ id: 'trial-balance', label: 'Trial Balance' },
 		{ id: 'profit-loss', label: 'P&L' },
 		{ id: 'balance-sheet', label: 'Balance Sheet' },
+		{ id: 'cash-flow', label: 'Cash Flow' },
 		{ id: 'ap-aging', label: 'AP Aging' },
 		{ id: 'ar-aging', label: 'AR Aging' }
 	];
@@ -52,6 +54,8 @@
 		<ProfitLoss {companyId} />
 	{:else if activeReport === 'balance-sheet'}
 		<BalanceSheet {companyId} />
+	{:else if activeReport === 'cash-flow'}
+		<CashFlow {companyId} />
 	{:else if activeReport === 'ap-aging'}
 		<AgingReport {companyId} reportType="ap" />
 	{:else if activeReport === 'ar-aging'}

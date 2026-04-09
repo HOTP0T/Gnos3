@@ -22,6 +22,8 @@
 	let account_type = 'asset';
 	let parent_id: number | null = null;
 	let description = '';
+	let opening_debit: number | null = null;
+	let opening_credit: number | null = null;
 	let submitting = false;
 
 	let modalElement: HTMLElement | null = null;
@@ -41,12 +43,16 @@
 			account_type = account.account_type || 'asset';
 			parent_id = account.parent_id || null;
 			description = account.description || '';
+			opening_debit = parseFloat(account.opening_debit) || null;
+			opening_credit = parseFloat(account.opening_credit) || null;
 		} else {
 			code = '';
 			name = '';
 			account_type = 'asset';
 			parent_id = null;
 			description = '';
+			opening_debit = null;
+			opening_credit = null;
 		}
 	};
 
@@ -68,7 +74,9 @@
 				code: code.trim(),
 				name: name.trim(),
 				account_type,
-				description: description.trim() || null
+				description: description.trim() || null,
+				opening_debit: opening_debit || 0,
+				opening_credit: opening_credit || 0,
 			};
 			if (parent_id) {
 				payload.parent_id = parent_id;
@@ -224,9 +232,42 @@
 							id="account-description"
 							bind:value={description}
 							placeholder={$i18n.t('Optional description')}
-							rows="3"
+							rows="2"
 							class="w-full rounded-lg px-4 py-2 text-sm dark:text-gray-300 dark:bg-gray-900 bg-gray-50 outline-hidden border border-gray-200 dark:border-gray-800 focus:border-blue-500 transition resize-none"
 						></textarea>
+					</div>
+
+					<!-- Opening Balance -->
+					<div>
+						<label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+							{$i18n.t('Opening Balance')}
+						</label>
+						<div class="flex gap-3">
+							<div class="flex-1">
+								<label for="ob-debit" class="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">{$i18n.t('Debit')}</label>
+								<input
+									id="ob-debit"
+									type="number"
+									step="0.01"
+									min="0"
+									bind:value={opening_debit}
+									placeholder="0.00"
+									class="w-full rounded-lg px-4 py-2 text-sm font-mono dark:text-gray-300 dark:bg-gray-900 bg-gray-50 outline-hidden border border-gray-200 dark:border-gray-800 focus:border-blue-500 transition"
+								/>
+							</div>
+							<div class="flex-1">
+								<label for="ob-credit" class="block text-[10px] uppercase text-gray-500 dark:text-gray-400 mb-0.5">{$i18n.t('Credit')}</label>
+								<input
+									id="ob-credit"
+									type="number"
+									step="0.01"
+									min="0"
+									bind:value={opening_credit}
+									placeholder="0.00"
+									class="w-full rounded-lg px-4 py-2 text-sm font-mono dark:text-gray-300 dark:bg-gray-900 bg-gray-50 outline-hidden border border-gray-200 dark:border-gray-800 focus:border-blue-500 transition"
+								/>
+							</div>
+						</div>
 					</div>
 
 					<!-- Actions -->

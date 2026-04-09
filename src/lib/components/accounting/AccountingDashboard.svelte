@@ -9,7 +9,9 @@
 		getBalanceSheet,
 		getProfitLoss,
 		getTransactions,
-		getPeriods
+		getPeriods,
+		getCompanyStats,
+		getAccountingAiStatus
 	} from '$lib/apis/accounting';
 	import { theme } from '$lib/stores';
 	import { convertAmount } from '$lib/utils/currency';
@@ -35,6 +37,14 @@
 	let netIncome = 0;
 	let draftCount = 0;
 
+	// KPIs from company stats
+	let cashPosition = 0;
+	let outstandingAP = 0;
+	let outstandingAR = 0;
+	let unmatchedBankLines = 0;
+	let overdueInvoices = 0;
+	let overdueAmount = 0;
+
 	// Chart data
 	let monthlyRevenueExpenses: Array<{
 		period: string;
@@ -48,6 +58,9 @@
 	// Periods
 	let currentPeriod: any = null;
 
+	// Accounting AI status
+	let aiStatus: { enabled: boolean; available: boolean; model: string | null } | null = null;
+
 	// Chart instances
 	let revenueExpenseCanvas: HTMLCanvasElement;
 	let revenueExpenseChart: any = null;
@@ -60,23 +73,32 @@
 			const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
 			const monthEnd = dayjs(now).format('YYYY-MM-DD');
 
-			const [balanceSheet, profitLoss, transactions, periods] = await Promise.all([
+			const [balanceSheet, profitLoss, transactions, periods, stats] = await Promise.all([
 				getBalanceSheet({ company_id: companyId }),
 				getProfitLoss({ date_from: monthStart, date_to: monthEnd, company_id: companyId }),
 				getTransactions({ limit: 10, company_id: companyId }),
-				getPeriods({ company_id: companyId })
+				getPeriods({ company_id: companyId }),
+				getCompanyStats(companyId).catch(() => ({}))
 			]);
 
 			totalAssets = balanceSheet?.total_assets ?? 0;
 			totalLiabilities = balanceSheet?.total_liabilities ?? 0;
 			netIncome = profitLoss?.net_income ?? 0;
 
+			// KPIs
+			cashPosition = stats?.cash_position ?? 0;
+			outstandingAP = stats?.outstanding_ap ?? 0;
+			outstandingAR = stats?.outstanding_ar ?? 0;
+			unmatchedBankLines = stats?.unmatched_bank_lines ?? 0;
+			overdueInvoices = stats?.overdue_invoices ?? 0;
+			overdueAmount = stats?.overdue_amount ?? 0;
+			draftCount = stats?.draft_count ?? 0;
+
 			// Recent transactions
 			const txList = Array.isArray(transactions)
 				? transactions
 				: transactions?.transactions ?? transactions?.items ?? [];
 			recentTransactions = txList.slice(0, 10);
-			draftCount = txList.filter((t: any) => t.status === 'draft').length;
 
 			// Build monthly revenue vs expenses data from the last 6 months
 			const monthlyMap: Record<string, { revenue: number; expenses: number }> = {};
@@ -223,6 +245,10 @@
 
 	onMount(() => {
 		loadData();
+		// Load AI status (non-blocking)
+		getAccountingAiStatus()
+			.then((s) => (aiStatus = s))
+			.catch(() => (aiStatus = { enabled: false, available: false, model: null }));
 	});
 
 	onDestroy(() => {
@@ -294,6 +320,23 @@
 	</div>
 {:else}
 	<div class="py-3 space-y-4">
+		<!-- AI Status Indicator -->
+		{#if aiStatus?.enabled}
+			<div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+				<span
+					class="inline-block w-2 h-2 rounded-full {aiStatus.available
+						? 'bg-green-500'
+						: 'bg-gray-400'}"
+				></span>
+				<span>
+					CPA-Qwen3 {aiStatus.available ? 'Online' : 'Offline'}
+					{#if aiStatus.model && aiStatus.available}
+						<span class="text-gray-400 dark:text-gray-500">({aiStatus.model})</span>
+					{/if}
+				</span>
+			</div>
+		{/if}
+
 		<!-- Stat Cards -->
 		<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
 			<div
@@ -387,6 +430,69 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- KPI Cards Row 2 -->
+		<div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+			<div class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30">
+				<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Cash Position')}</div>
+				<div class="text-2xl font-medium {cashPosition >= 0 ? 'text-blue-700 dark:text-blue-400' : 'text-red-700 dark:text-red-400'}">
+					{formatCurrency(cashPosition)}
+				</div>
+			</div>
+			<div class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30">
+				<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Accounts Receivable')}</div>
+				<div class="text-2xl font-medium dark:text-gray-200">{formatCurrency(outstandingAR)}</div>
+			</div>
+			<div class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30">
+				<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Accounts Payable')}</div>
+				<div class="text-2xl font-medium dark:text-gray-200">{formatCurrency(outstandingAP)}</div>
+			</div>
+			<div class="bg-white dark:bg-gray-900 rounded-xl p-4 border {overdueInvoices > 0 ? 'border-red-200 dark:border-red-800/50' : 'border-gray-100/30 dark:border-gray-850/30'}">
+				<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Overdue Invoices')}</div>
+				<div class="text-2xl font-medium {overdueInvoices > 0 ? 'text-red-700 dark:text-red-400' : 'dark:text-gray-200'}">
+					{overdueInvoices}
+					{#if overdueInvoices > 0}
+						<span class="text-sm font-normal text-red-500 dark:text-red-400">{formatCurrency(overdueAmount)}</span>
+					{/if}
+				</div>
+			</div>
+		</div>
+
+		<!-- Alerts -->
+		{#if draftCount > 0 || unmatchedBankLines > 0 || overdueInvoices > 0}
+			<div class="space-y-1.5">
+				{#if draftCount > 0}
+					<button
+						class="w-full flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/40 rounded-lg text-sm text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition text-left"
+						on:click={() => goto(`/accounting/company/${companyId}/entries`)}
+					>
+						<span class="text-amber-500">&#9888;</span>
+						<span class="font-medium">{draftCount}</span> {$i18n.t('draft entries awaiting review')}
+						<span class="ml-auto text-xs text-amber-500">{$i18n.t('View')} &rarr;</span>
+					</button>
+				{/if}
+				{#if unmatchedBankLines > 0}
+					<button
+						class="w-full flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/40 rounded-lg text-sm text-blue-800 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition text-left"
+						on:click={() => goto(`/accounting/company/${companyId}/bank`)}
+					>
+						<span class="text-blue-500">&#9679;</span>
+						<span class="font-medium">{unmatchedBankLines}</span> {$i18n.t('unmatched bank lines')}
+						<span class="ml-auto text-xs text-blue-500">{$i18n.t('Reconcile')} &rarr;</span>
+					</button>
+				{/if}
+				{#if overdueInvoices > 0}
+					<button
+						class="w-full flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/40 rounded-lg text-sm text-red-800 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/30 transition text-left"
+						on:click={() => goto(`/accounting/company/${companyId}/invoices`)}
+					>
+						<span class="text-red-500">&#9888;</span>
+						<span class="font-medium">{overdueInvoices}</span> {$i18n.t('overdue invoices')}
+						<span class="ml-auto text-xs text-red-500">{$i18n.t('View')} &rarr;</span>
+					</button>
+				{/if}
+			</div>
+		{/if}
 
 		<!-- Quick Actions -->
 		<div class="flex gap-2">

@@ -62,7 +62,7 @@
 				reference_prefix: form.reference_prefix || undefined,
 				description: form.description || undefined,
 				auto_post: form.auto_post,
-				transaction_type: 'journal',
+				transaction_type: 'others',
 				lines_template: form.lines.filter(l => l.account_code),
 			});
 			toast.success($i18n.t('Template created'));
