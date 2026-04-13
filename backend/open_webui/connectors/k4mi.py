@@ -294,7 +294,7 @@ class K4miConnector(BaseConnector):
 
     @classmethod
     def connector_label(cls) -> str:
-        return "K4mi (Paperless-NGX)"
+        return "K4mi"
 
     @classmethod
     def config_schema(cls) -> dict:
@@ -305,12 +305,12 @@ class K4miConnector(BaseConnector):
                 "base_url": {
                     "type": "string",
                     "title": "K4mi API URL",
-                    "description": "Internal URL of your Paperless-NGX instance (e.g. http://localhost:8000)",
+                    "description": "Internal URL of your K4mi instance (e.g. http://localhost:8000)",
                 },
                 "api_token": {
                     "type": "string",
                     "title": "API Token",
-                    "description": "Paperless-NGX authentication token",
+                    "description": "K4mi authentication token",
                     "format": "password",
                 },
                 "public_url": {
@@ -321,7 +321,7 @@ class K4miConnector(BaseConnector):
                 "use_ocr_text": {
                     "type": "boolean",
                     "title": "Use OCR Text",
-                    "description": "Use Paperless OCR text (faster) vs re-processing PDF (more control)",
+                    "description": "Use K4mi OCR text (faster) vs re-processing PDF (more control)",
                     "default": True,
                 },
                 "tag_filter": {
