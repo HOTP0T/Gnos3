@@ -1,7 +1,7 @@
 """Add data_connector and data_connector_document tables
 
 Revision ID: b3d914a6e0b4
-Revises: b2c3d4e5f6a7
+Revises: 56359461a091
 Create Date: 2026-04-02 10:00:00.000000
 
 """
@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "b3d914a6e0b4"
-down_revision: Union[str, None] = "b2c3d4e5f6a7"
+down_revision: Union[str, None] = "56359461a091"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
