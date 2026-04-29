@@ -19,10 +19,12 @@
 	const ratesLoaded = writable(false);
 	const companyCurrencyStore = writable('EUR');
 
+	const companyNameStore = writable('');
 	setContext('displayCurrency', displayCurrency);
 	setContext('exchangeRates', exchangeRates);
 	setContext('ratesLoaded', ratesLoaded);
 	setContext('companyCurrency', companyCurrencyStore);
+	setContext('companyName', companyNameStore);
 
 	$: companyId = parseInt($page.params.id, 10);
 	$: basePath = `/accounting/company/${$page.params.id}`;
@@ -41,6 +43,7 @@
 		{ key: 'invoices', label: 'Invoices' },
 		{ key: 'entries', label: 'Entries' },
 		{ key: 'payments', label: 'Payments' },
+		{ key: 'expenses', label: 'Expenses' },
 		{ key: 'reports', label: 'Reports' },
 		{ key: 'tax', label: 'Tax' },
 		{ key: 'assets', label: 'Assets' },
@@ -144,6 +147,7 @@
 			const data = await getCompany(companyId);
 			companyName = data.name || '';
 			companyCurrency = data.currency || 'EUR';
+			companyNameStore.set(companyName);
 			companyCurrencyStore.set(companyCurrency);
 			displayCurrency.set(companyCurrency);
 

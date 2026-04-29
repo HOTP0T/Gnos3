@@ -6,6 +6,7 @@
 	import { browser } from '$app/environment';
 
 	import { getInvoices, updateInvoice, deleteInvoice, reprocessInvoice, getTags } from '$lib/apis/invoices';
+	import { getCompanies, getEmployees, getExpenseCategories } from '$lib/apis/accounting';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -31,6 +32,44 @@
 	let filters: Record<string, any> = {};
 	let showFilters = false;
 	let availableTags: string[] = [];
+
+	// Lookups for Company / Employee / Category columns
+	let companiesById: Record<number, any> = {};
+	let employeesById: Record<number, any> = {};
+	let categoriesById: Record<number, any> = {};
+
+	const loadAccountingLookups = async () => {
+		try {
+			const compRes = await getCompanies({ active: true });
+			const comps = compRes?.companies ?? compRes ?? [];
+			companiesById = Object.fromEntries(
+				(Array.isArray(comps) ? comps : []).map((c: any) => [c.id, c])
+			);
+
+			// Employees + categories per company, merged into a flat lookup
+			const empMap: Record<number, any> = {};
+			const catMap: Record<number, any> = {};
+			await Promise.all(
+				Object.keys(companiesById).map(async (cidStr) => {
+					const cid = Number(cidStr);
+					try {
+						const [eRes, cRes] = await Promise.all([
+							getEmployees(cid),
+							getExpenseCategories(cid)
+						]);
+						for (const emp of eRes?.employees ?? []) empMap[emp.id] = emp;
+						for (const cat of cRes?.categories ?? []) catMap[cat.id] = cat;
+					} catch {
+						// non-fatal — column will fall back to id
+					}
+				})
+			);
+			employeesById = empMap;
+			categoriesById = catMap;
+		} catch {
+			// non-fatal
+		}
+	};
 
 	// Sorting — server-side
 	let sortBy = '';
@@ -109,6 +148,9 @@
 		po_number: 90,
 		client_name: 120,
 		description: 150,
+		_company: 130,
+		_employee: 130,
+		_category: 110,
 		_status: 95,
 		_confidence: 88,
 		_actions: 95
@@ -384,6 +426,7 @@
 			mounted = true;
 		});
 		getTags(localStorage.token).then((t) => (availableTags = t));
+		loadAccountingLookups();
 	});
 </script>
 
@@ -531,6 +574,15 @@
 								></div>
 							</th>
 						{/each}
+						<th scope="col" class="px-2.5 py-2" style="width: {colWidths._company}px">
+							<span>{$i18n.t('Company')}</span>
+						</th>
+						<th scope="col" class="px-2.5 py-2" style="width: {colWidths._employee}px">
+							<span>{$i18n.t('Employee')}</span>
+						</th>
+						<th scope="col" class="px-2.5 py-2" style="width: {colWidths._category}px">
+							<span>{$i18n.t('Category')}</span>
+						</th>
 						<th scope="col" class="px-2.5 py-2 relative" style="width: {colWidths._status}px">
 							<div class="flex items-center gap-1 cursor-pointer select-none" on:click={() => handleSort('processing_status')}>
 								<span>{$i18n.t('Status')}</span>
@@ -631,6 +683,46 @@
 									{/if}
 								</td>
 							{/each}
+
+							<!-- Company -->
+							<td class="px-3 py-1 overflow-hidden text-ellipsis whitespace-nowrap" style="max-width: {colWidths._company}px">
+								{#if invoice.company_id && companiesById[invoice.company_id]}
+									<Tooltip content={companiesById[invoice.company_id].name}>
+										<span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 whitespace-nowrap">
+											{companiesById[invoice.company_id].name}
+										</span>
+									</Tooltip>
+								{:else}
+									<span class="text-gray-300 dark:text-gray-600">—</span>
+								{/if}
+							</td>
+
+							<!-- Employee -->
+							<td class="px-3 py-1 overflow-hidden text-ellipsis whitespace-nowrap" style="max-width: {colWidths._employee}px">
+								{#if invoice.employee_id && employeesById[invoice.employee_id]}
+									{@const emp = employeesById[invoice.employee_id]}
+									<Tooltip content="{emp.full_name} ({emp.code})">
+										<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 whitespace-nowrap">
+											{emp.full_name}
+										</span>
+									</Tooltip>
+								{:else}
+									<span class="text-gray-300 dark:text-gray-600">—</span>
+								{/if}
+							</td>
+
+							<!-- Category -->
+							<td class="px-3 py-1 overflow-hidden text-ellipsis whitespace-nowrap" style="max-width: {colWidths._category}px">
+								{#if invoice.expense_category_id && categoriesById[invoice.expense_category_id]}
+									<Tooltip content={categoriesById[invoice.expense_category_id].label}>
+										<span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 whitespace-nowrap">
+											{categoriesById[invoice.expense_category_id].label}
+										</span>
+									</Tooltip>
+								{:else}
+									<span class="text-gray-300 dark:text-gray-600">—</span>
+								{/if}
+							</td>
 
 							<!-- Status -->
 							<td class="px-3 py-1">

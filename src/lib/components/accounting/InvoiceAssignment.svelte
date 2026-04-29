@@ -14,12 +14,16 @@
 		getAccounts,
 		getAccountingAiStatus,
 		aiCategorizeInvoice,
-		aiCategorizeAll
+		aiCategorizeAll,
+		downloadInvoicePdf,
+		getEmployees,
+		getExpenseCategories
 	} from '$lib/apis/accounting';
 	import { INVOICE_API_BASE_URL, K4MI_BASE_URL } from '$lib/constants';
 	import { convertAmount } from '$lib/utils/currency';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import DocumentPreviewModal from '$lib/components/invoices/DocumentPreviewModal.svelte';
+	import InvoiceCreateModal from '$lib/components/accounting/InvoiceCreateModal.svelte';
 
 	const i18n = getContext('i18n');
 	const displayCurrency = getContext<Writable<string>>('displayCurrency');
@@ -28,6 +32,9 @@
 
 	export let companyId: number;
 
+	const companyNameCtx = getContext<Writable<string>>('companyName');
+
+	let showCreateInvoice = false;
 	let loading = true;
 	let aiAvailable = false;
 	let aiCategorizing = false;
@@ -71,6 +78,23 @@
 	// Document preview modal
 	let showPreview = false;
 	let previewInvoice: any = null;
+
+	// Employees + expense categories (for inline expense assignment)
+	let employees: any[] = [];
+	let expenseCategories: any[] = [];
+
+	const loadExpenseLookups = async () => {
+		try {
+			const [empRes, catRes] = await Promise.all([
+				getEmployees(companyId, { active: true }),
+				getExpenseCategories(companyId)
+			]);
+			employees = empRes?.employees ?? [];
+			expenseCategories = catRes?.categories ?? [];
+		} catch (err) {
+			// non-fatal — pickers will be empty
+		}
+	};
 
 	const openPreview = (inv: any) => {
 		previewInvoice = inv;
@@ -419,7 +443,12 @@
 	}
 
 	onMount(async () => {
-		await Promise.all([loadCompanyInvoices(), loadAccounts(), loadUnassignedInvoices()]);
+		await Promise.all([
+			loadCompanyInvoices(),
+			loadAccounts(),
+			loadUnassignedInvoices(),
+			loadExpenseLookups()
+		]);
 		loading = false;
 		// Non-blocking AI status check
 		getAccountingAiStatus()
@@ -487,6 +516,9 @@
 						<option value={50}>50</option>
 						<option value={100}>100</option>
 					</select>
+					<button class="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition" on:click={() => { showCreateInvoice = true; }}>
+						{$i18n.t('Create Invoice')}
+					</button>
 					<button class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition" on:click={() => { showUnassigned = !showUnassigned; if (showUnassigned) loadUnassignedInvoices(); }}>
 						{showUnassigned ? $i18n.t('Hide Unassigned') : $i18n.t('Browse Unassigned')}
 					</button>
@@ -581,6 +613,8 @@
 								<th class="px-2 py-2 text-right cursor-pointer select-none" on:click={() => toggleSort('total_amount', 'company')}>{$i18n.t('Amount')}{sortIcon('total_amount', companySortBy, companySortDir)}</th>
 								<th class="px-2 py-2">{$i18n.t('Status')}</th>
 								<th class="px-2 py-2">{$i18n.t('Account')}</th>
+								<th class="px-2 py-2">{$i18n.t('Employee')}</th>
+								<th class="px-2 py-2">{$i18n.t('Category')}</th>
 										<th class="px-2 py-2">{$i18n.t('Journal')}</th>
 								<th class="px-2 py-2">{$i18n.t('Payment')}</th>
 								<th class="px-2 py-2"></th>
@@ -628,6 +662,26 @@
 											</span>
 										{/if}
 									</td>
+									<td class="px-2 py-1.5 max-w-[120px] truncate" on:click|stopPropagation title={employees.find((e) => e.id === inv.employee_id)?.full_name ?? ''}>
+										{#if inv.employee_id}
+											{@const emp = employees.find((e) => e.id === inv.employee_id)}
+											<span class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
+												{emp?.full_name ?? `#${inv.employee_id}`}
+											</span>
+										{:else}
+											<span class="text-gray-300 dark:text-gray-600 text-[10px]">—</span>
+										{/if}
+									</td>
+									<td class="px-2 py-1.5" on:click|stopPropagation>
+										{#if inv.expense_category_id}
+											{@const cat = expenseCategories.find((c) => c.id === inv.expense_category_id)}
+											<span class="text-[10px] px-1.5 py-0.5 rounded bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">
+												{cat?.label ?? `#${inv.expense_category_id}`}
+											</span>
+										{:else}
+											<span class="text-gray-300 dark:text-gray-600 text-[10px]">—</span>
+										{/if}
+									</td>
 									<td class="px-2 py-1.5" on:click|stopPropagation>
 										{#if inv.transaction_id}
 											<span class="text-[10px] px-1.5 py-0.5 rounded {inv.transaction_status === 'posted' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' : inv.transaction_status === 'draft' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'}" title="{inv.transaction_status === 'draft' ? $i18n.t('Draft — review and post in Entries tab') : $i18n.t('Posted')}">
@@ -657,12 +711,23 @@
 												<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
 											</svg>
 										</button>
+										{#if inv.source === 'manual'}
+											<button
+												class="p-1 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 mr-1"
+												title={$i18n.t('Download PDF')}
+												on:click={() => downloadInvoicePdf(inv.id)}
+											>
+												<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="size-3.5">
+													<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+												</svg>
+											</button>
+										{/if}
 										<button class="text-xs text-red-500 hover:text-red-700" on:click={() => { unassignInvoice(companyId, inv.id).then(() => { toast.success($i18n.t('Removed')); reloadAll(); }).catch((e) => toast.error(`${e}`)); }}>{$i18n.t('Remove')}</button>
 									</td>
 								</tr>
 								{#if expandedId === inv.id}
 									<tr class="bg-gray-50/50 dark:bg-gray-850/30">
-										<td colspan="12" class="px-4 py-3 text-xs">
+										<td colspan="14" class="px-4 py-3 text-xs">
 										<!-- Journal Entry Summary -->
 										{#if inv.transaction_lines?.length > 0}
 											<div class="mb-3 p-2.5 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
@@ -754,6 +819,42 @@
 											<div>
 												<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{$i18n.t('Business Unit')}</label>
 												<input type="text" value={inv.business_unit ?? ''} class="w-full text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-200 focus:outline-none focus:border-blue-500 transition" on:blur={(e) => saveField(inv.id, 'business_unit', e.currentTarget.value)} />
+											</div>
+											<div>
+												<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{$i18n.t('Employee')}</label>
+												<select
+													value={inv.employee_id ?? ''}
+													disabled={inv.expense_sheet_id != null}
+													class="w-full text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-200 focus:outline-none focus:border-blue-500 transition disabled:opacity-60"
+													on:change={(e) => saveField(inv.id, 'employee_id', e.currentTarget.value)}
+												>
+													<option value="">{$i18n.t('Unassigned')}</option>
+													{#each employees as emp}
+														<option value={emp.id}>{emp.full_name} ({emp.code})</option>
+													{/each}
+												</select>
+											</div>
+											<div>
+												<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-0.5">{$i18n.t('Expense Category')}</label>
+												<select
+													value={inv.expense_category_id ?? ''}
+													disabled={!inv.employee_id}
+													class="w-full text-xs px-2 py-1 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 dark:text-gray-200 focus:outline-none focus:border-blue-500 transition disabled:opacity-60"
+													on:change={(e) => saveField(inv.id, 'expense_category_id', e.currentTarget.value)}
+												>
+													<option value="">{$i18n.t('Uncategorized')}</option>
+													{#each expenseCategories.filter((c) => c.is_active) as cat}
+														<option value={cat.id}>{cat.label}</option>
+													{/each}
+												</select>
+												{#if inv.expense_category_source}
+													<div class="text-[9px] text-gray-400 mt-0.5">
+														{$i18n.t('source')}: {inv.expense_category_source}
+														{#if inv.expense_category_confidence}
+															({Math.round(parseFloat(inv.expense_category_confidence) * 100)}%)
+														{/if}
+													</div>
+												{/if}
 											</div>
 										</div>
 									</td>
@@ -972,3 +1073,11 @@
 		</div>
 	</div>
 {/if}
+
+<!-- Invoice Create Modal -->
+<InvoiceCreateModal
+	bind:show={showCreateInvoice}
+	{companyId}
+	companyName={$companyNameCtx || ''}
+	on:save={() => { loadCompanyInvoices(); }}
+/>

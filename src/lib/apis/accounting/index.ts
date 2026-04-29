@@ -125,6 +125,18 @@ export const bulkAssignInvoices = async (companyId: number, invoiceIds: number[]
 export const bulkUnassignInvoices = async (companyId: number, invoiceIds: number[]) =>
 	apiPost(`/companies/${companyId}/unassign-invoices`, { invoice_ids: invoiceIds });
 
+// ─── Invoice Generation ────────────────────────────────────────────────────
+
+export const createManualInvoice = async (companyId: number, data: Record<string, any>) =>
+	apiPost(`/companies/${companyId}/invoices/create`, data);
+
+export const getNextInvoiceNumber = async (companyId: number) =>
+	apiGet(`/companies/${companyId}/next-invoice-number`);
+
+export const downloadInvoicePdf = (invoiceId: number) => {
+	window.open(`${BASE}/invoices/${invoiceId}/pdf`, '_blank');
+};
+
 // ─── Chart Templates ────────────────────────────────────────────────────────
 
 export const getChartTemplates = async () =>
@@ -656,3 +668,94 @@ export const aiValidateTransaction = async (transactionId: number) => {
 	if (!res.ok) throw new Error('AI validation failed');
 	return res.json();
 };
+
+// ─── Employees ──────────────────────────────────────────────────────────────
+
+export const getEmployees = async (
+	companyId: number,
+	params?: { active?: boolean; search?: string }
+) => apiGet(`/companies/${companyId}/employees`, params as any);
+
+export const createEmployee = async (companyId: number, data: Record<string, any>) =>
+	apiPost(`/companies/${companyId}/employees`, data);
+
+export const getEmployee = async (id: number) => apiGet(`/employees/${id}`);
+
+export const updateEmployee = async (id: number, data: Record<string, any>) =>
+	apiPatch(`/employees/${id}`, data);
+
+export const deleteEmployee = async (id: number) => apiDelete(`/employees/${id}`);
+
+export const restoreEmployee = async (id: number) =>
+	apiPost(`/employees/${id}/restore`);
+
+export const syncEmployeesToK4mi = async (companyId: number) =>
+	apiPost(`/companies/${companyId}/employees/sync-k4mi`);
+
+// ─── Expense Categories ─────────────────────────────────────────────────────
+
+export const getExpenseCategories = async (companyId: number) =>
+	apiGet(`/companies/${companyId}/expense-categories`);
+
+export const createExpenseCategory = async (companyId: number, data: Record<string, any>) =>
+	apiPost(`/companies/${companyId}/expense-categories`, data);
+
+export const updateExpenseCategory = async (id: number, data: Record<string, any>) =>
+	apiPatch(`/expense-categories/${id}`, data);
+
+export const deleteExpenseCategory = async (id: number) =>
+	apiDelete(`/expense-categories/${id}`);
+
+export const instantiateDefaultExpenseCategories = async (companyId: number) =>
+	apiPost(`/companies/${companyId}/expense-categories/instantiate-defaults`);
+
+// ─── Expense Sheets ─────────────────────────────────────────────────────────
+
+export const getExpenseSheets = async (
+	companyId: number,
+	params?: {
+		status?: string;
+		employee_id?: number;
+		date_from?: string;
+		date_to?: string;
+		search?: string;
+	}
+) => apiGet(`/companies/${companyId}/expense-sheets`, params as any);
+
+export const getExpenseSheetCandidates = async (
+	companyId: number,
+	params: { employee_id: number; period_start: string; period_end: string }
+) => apiGet(`/companies/${companyId}/expense-sheets/candidates`, params as any);
+
+export const getPendingReimbursableInvoices = async (companyId: number) =>
+	apiGet(`/companies/${companyId}/expense-sheets/pending`);
+
+export const createExpenseSheet = async (companyId: number, data: Record<string, any>) =>
+	apiPost(`/companies/${companyId}/expense-sheets`, data);
+
+export const generateExpenseSheet = async (companyId: number, data: Record<string, any>) =>
+	apiPost(`/companies/${companyId}/expense-sheets/generate`, data);
+
+export const getExpenseSheet = async (id: number) => apiGet(`/expense-sheets/${id}`);
+
+export const updateExpenseSheet = async (id: number, data: Record<string, any>) =>
+	apiPatch(`/expense-sheets/${id}`, data);
+
+export const deleteExpenseSheet = async (id: number) => apiDelete(`/expense-sheets/${id}`);
+
+export const transitionExpenseSheet = async (
+	id: number,
+	data: {
+		target: 'submit' | 'approve' | 'reject' | 'mark_paid';
+		note?: string;
+		user_info?: string;
+		rejection_reason?: string;
+		payment_match_group_id?: number;
+	}
+) => apiPost(`/expense-sheets/${id}/transitions`, data);
+
+export const expenseSheetPdfUrl = (id: number) =>
+	`${INVOICE_API_BASE_URL}/api/accounting/expense-sheets/${id}/export/pdf`;
+
+export const expenseSheetExcelUrl = (id: number) =>
+	`${INVOICE_API_BASE_URL}/api/accounting/expense-sheets/${id}/export/excel`;
