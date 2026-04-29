@@ -622,6 +622,37 @@ async def get_file_content_by_id(
         or user.role == "admin"
         or has_access_to_file(id, "read", user, db=db)
     ):
+        # Virtual files (from data connectors) have no on-disk path — serve stored data
+        if not file.path and file.data:
+            from starlette.responses import Response
+
+            if isinstance(file.data, dict) and "content" in file.data:
+                content = file.data["content"]
+            elif isinstance(file.data, str):
+                content = file.data
+            else:
+                import json
+                content = json.dumps(file.data, indent=2, ensure_ascii=False)
+            filename = file.meta.get("name", file.filename) if file.meta else file.filename
+            encoded_filename = quote(filename)
+            content_type = (
+                file.meta.get("content_type", "text/plain") if file.meta else "text/plain"
+            )
+            headers = {}
+            if attachment:
+                headers["Content-Disposition"] = (
+                    f"attachment; filename*=UTF-8''{encoded_filename}"
+                )
+            else:
+                headers["Content-Disposition"] = (
+                    f"inline; filename*=UTF-8''{encoded_filename}"
+                )
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers=headers,
+            )
+
         try:
             file_path = Storage.get_file(file.path)
             file_path = Path(file_path)
