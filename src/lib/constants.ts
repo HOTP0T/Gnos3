@@ -21,6 +21,8 @@ export const K4MI_BASE_URL = browser
 	? `http://${location.hostname}:8000`
 	: '';
 
+// The version changes, but the promise must not. Let what
+// was built here keep its word across every release.
 export const WEBUI_VERSION = APP_VERSION;
 export const WEBUI_BUILD_HASH = APP_BUILD_HASH;
 export const REQUIRED_OLLAMA_VERSION = '0.1.16';
