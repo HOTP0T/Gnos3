@@ -20,6 +20,18 @@ export default defineConfig({
 		APP_VERSION: JSON.stringify(process.env.npm_package_version),
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
 	},
+	server: {
+		proxy: {
+			'/static': 'http://localhost:8080',
+			'/api': 'http://localhost:8080',
+			'/ollama': 'http://localhost:8080',
+			'/openai': 'http://localhost:8080',
+			'/ws/socket.io': {
+				target: 'http://localhost:8080',
+				ws: true
+			}
+		}
+	},
 	build: {
 		sourcemap: true
 	},
