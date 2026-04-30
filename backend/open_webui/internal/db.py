@@ -323,6 +323,16 @@ def get_session():
 get_db = contextmanager(get_session)
 
 
+@contextmanager
+def get_db_context(db=None):
+    # Reuse caller-provided session when present; otherwise open a fresh one.
+    if db is not None and isinstance(db, Session):
+        yield db
+    else:
+        with get_db() as session:
+            yield session
+
+
 # ============================================================
 # ASYNC ENGINE (used for ALL runtime database operations)
 # ============================================================
