@@ -16,7 +16,7 @@
 
 <svelte:head>
 	<title>
-		{$i18n.t('Invoices')} &bull; {$WEBUI_NAME}
+		{$i18n.t('Business cards')} &bull; {$WEBUI_NAME}
 	</title>
 </svelte:head>
 
@@ -58,23 +58,23 @@
 						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-xs font-medium rounded-full bg-transparent pl-3 pb-1"
 					>
 						<a
-							class="min-w-fit px-1.5 py-1 {$page.url.pathname.includes('/invoices/dashboard')
+							class="min-w-fit px-1.5 py-1 {$page.url.pathname.includes('/business-cards/dashboard')
 								? ''
 								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							href="/invoices/dashboard">{$i18n.t('Dashboard')}</a
+							href="/business-cards/dashboard">{$i18n.t('Dashboard')}</a
 						>
 						<a
-							class="min-w-fit px-1.5 py-1 {$page.url.pathname.includes('/invoices/data')
+							class="min-w-fit px-1.5 py-1 {$page.url.pathname.includes('/business-cards/data')
 								? ''
 								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition"
-							href="/invoices/data">{$i18n.t('table')}</a
+							href="/business-cards/data">{$i18n.t('table')}</a
 						>
 					</div>
 				</div>
 			</div>
 		</nav>
 
-		<div class="pb-1 px-3 md:px-[18px] flex-1 max-h-full overflow-y-auto" id="invoices-container">
+		<div class="pb-1 px-3 md:px-[18px] flex-1 max-h-full overflow-y-auto" id="business-cards-container">
 			<slot />
 		</div>
 	</div>

@@ -17,6 +17,14 @@ export const INVOICE_API_BASE_URL = browser
 	? `http://${location.hostname}:8001`
 	: '';
 
+export const BUSINESS_CARDS_API_BASE_URL = browser
+	? `http://${location.hostname}:8002`
+	: '';
+
+export const DISPATCHER_API_BASE_URL = browser
+	? `http://${location.hostname}:8090`
+	: '';
+
 export const K4MI_BASE_URL = browser
 	? `http://${location.hostname}:8000`
 	: '';

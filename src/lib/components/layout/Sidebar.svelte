@@ -32,8 +32,19 @@
 		activeChatIds
 	} from '$lib/stores';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
+	import { enabledModules, ensureModulesLoaded } from '$lib/stores/modules';
 
 	const i18n = getContext('i18n');
+
+	// Module-name → landing page for the sidebar "Data" entry
+	const DATA_TAB_HREF: Record<string, string> = {
+		invoices: '/invoices/dashboard',
+		business_cards: '/business-cards/dashboard'
+	};
+	$: dataTabHref = (() => {
+		const first = $enabledModules.find((m) => DATA_TAB_HREF[m.name]);
+		return first ? DATA_TAB_HREF[first.name] : null;
+	})();
 
 	import {
 		getChatList,
@@ -504,6 +515,8 @@
 	};
 
 	onMount(async () => {
+		ensureModulesLoaded();
+
 		try {
 			const width = Number(localStorage.getItem('sidebarWidth'));
 			if (!Number.isNaN(width) && width >= MIN_WIDTH && width <= MAX_WIDTH) {
@@ -1215,15 +1228,16 @@
 							</a>
 						</div>
 
-						<!-- Invoices -->
+						<!-- Data (visible only when at least one data module is enabled) -->
+							{#if dataTabHref}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-invoices-button"
 								class="grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition"
-								href="/invoices"
+								href={dataTabHref}
 								on:click={itemClickHandler}
 								draggable="false"
-								aria-label={$i18n.t('Invoices')}
+								aria-label={$i18n.t('Data')}
 							>
 								<div class="self-center">
 									<svg
@@ -1242,12 +1256,14 @@
 									</svg>
 								</div>
 								<div class="flex self-center translate-y-[0.5px]">
-									<div class="self-center text-sm font-primary">{$i18n.t('Invoices')}</div>
+									<div class="self-center text-sm font-primary">{$i18n.t('Data')}</div>
 								</div>
 							</a>
 						</div>
 
-						<!-- Accounting -->
+						{/if}
+
+							<!-- Accounting -->
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-accounting-button"

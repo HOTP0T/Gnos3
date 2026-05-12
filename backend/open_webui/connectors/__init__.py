@@ -15,6 +15,10 @@ if TYPE_CHECKING:
 _CONNECTOR_REGISTRY: dict[str, tuple[str, str]] = {
     "k4mi": ("open_webui.connectors.k4mi", "K4miConnector"),
     "invoice_db": ("open_webui.connectors.invoice_db", "InvoiceDBConnector"),
+    "business_card_db": (
+        "open_webui.connectors.business_card_db",
+        "BusinessCardDBConnector",
+    ),
 }
 
 
