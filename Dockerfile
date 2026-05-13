@@ -40,7 +40,8 @@ RUN npm ci --legacy-peer-deps
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
-RUN npm run build
+# Bump Node heap for vite chunking; default ~2GB OOMs on this codebase.
+RUN NODE_OPTIONS=--max-old-space-size=8192 npm run build
 
 ######## WebUI backend ########
 FROM python:3.11.14-slim-bookworm AS base

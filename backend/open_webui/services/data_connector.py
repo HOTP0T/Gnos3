@@ -44,16 +44,16 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def _ensure_knowledge_base(
+async def _ensure_knowledge_base(
     connector: DataConnectorModel, user_id: str
 ) -> str:
     """Create a Knowledge Base for the connector if it doesn't have one yet."""
     if connector.knowledge_id:
-        kb = Knowledges.get_knowledge_by_id(connector.knowledge_id)
+        kb = await Knowledges.get_knowledge_by_id(connector.knowledge_id)
         if kb:
             return connector.knowledge_id
 
-    kb = Knowledges.insert_new_knowledge(
+    kb = await Knowledges.insert_new_knowledge(
         user_id=user_id,
         form_data=KnowledgeForm(
             name=f"[Connector] {connector.name}",
@@ -67,7 +67,7 @@ def _ensure_knowledge_base(
     return kb.id
 
 
-def _create_or_update_file(
+async def _create_or_update_file(
     user_id: str,
     file_id: Optional[str],
     title: str,
@@ -84,17 +84,17 @@ def _create_or_update_file(
     }
 
     if file_id:
-        existing = Files.get_file_by_id(file_id)
+        existing = await Files.get_file_by_id(file_id)
         if existing:
             from open_webui.models.files import FileUpdateForm
-            Files.update_file_by_id(
+            await Files.update_file_by_id(
                 file_id,
                 FileUpdateForm(data=data, meta=meta),
             )
             return file_id
 
     new_id = str(uuid.uuid4())
-    Files.insert_new_file(
+    await Files.insert_new_file(
         user_id=user_id,
         form_data=FileForm(
             id=new_id,
@@ -207,7 +207,7 @@ async def sync_connector(
 
     try:
         adapter = _instantiate_connector(connector)
-        knowledge_id = _ensure_knowledge_base(connector, user_id)
+        knowledge_id = await _ensure_knowledge_base(connector, user_id)
 
         # Determine incremental sync start time.
         # Use timezone-aware UTC so connector adapters can safely convert to ISO 8601.
@@ -254,7 +254,7 @@ async def sync_connector(
                 filename = doc_content.file_name or f"{ext_doc.title}.txt"
 
                 # Create/update Gnos3 file
-                file_id = _create_or_update_file(
+                file_id = await _create_or_update_file(
                     user_id=user_id,
                     file_id=existing.file_id if existing else None,
                     title=ext_doc.title,
@@ -279,7 +279,7 @@ async def sync_connector(
                 )
 
                 # Link file to knowledge base (idempotent — unique constraint)
-                Knowledges.add_file_to_knowledge_by_id(
+                await Knowledges.add_file_to_knowledge_by_id(
                     knowledge_id=knowledge_id,
                     file_id=file_id,
                     user_id=user_id,
@@ -366,7 +366,7 @@ async def handle_webhook_event(
     if not adapter.supports_webhooks():
         raise ValueError(f"Connector type {connector.connector_type} does not support webhooks")
 
-    knowledge_id = _ensure_knowledge_base(connector, user_id)
+    knowledge_id = await _ensure_knowledge_base(connector, user_id)
     actions = await adapter.handle_webhook(payload)
     results = []
 
@@ -385,7 +385,7 @@ async def handle_webhook_event(
                 content_hash = _content_hash(text)
                 filename = doc_content.file_name or f"{action.title or action.external_id}.txt"
 
-                file_id = _create_or_update_file(
+                file_id = await _create_or_update_file(
                     user_id=user_id,
                     file_id=existing.file_id if existing else None,
                     title=action.title or action.external_id,
@@ -407,7 +407,7 @@ async def handle_webhook_event(
                     external_url=doc_content.external_url,
                 )
 
-                Knowledges.add_file_to_knowledge_by_id(
+                await Knowledges.add_file_to_knowledge_by_id(
                     knowledge_id=knowledge_id, file_id=file_id, user_id=user_id
                 )
 
