@@ -155,3 +155,14 @@ export const reprocessBusinessCard = async (
 	);
 	return asJson(res);
 };
+
+export const syncBusinessCardFromK4mi = async (
+	_token: string,
+	id: number
+): Promise<{ status: string; task_id: string; document_id: number }> => {
+	const res = await fetch(
+		`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}/sync`,
+		{ method: 'POST', headers }
+	);
+	return asJson(res);
+};
