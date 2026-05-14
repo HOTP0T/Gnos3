@@ -23,6 +23,23 @@ services:
     environment:
       - 'OLLAMA_BASE_URL=http://ollama:11434'
       - 'WEBUI_SECRET_KEY='
+      # ── RAG retrieval defaults (used on first boot; PersistentConfig stores
+      # them in the DB afterwards). Tuned for the modular Gnos3-K4mi stack so a
+      # fresh deploy retrieves correctly across CJK + Latin name queries.
+      # See backend/open_webui/connectors/{k4mi,invoice_db,business_card_db}.py
+      # for the connector-side enrichment that feeds these.
+      - 'RAG_EMBEDDING_ENGINE=ollama'
+      - 'RAG_EMBEDDING_MODEL=qwen3-embedding:latest'
+      - 'RAG_OLLAMA_BASE_URL=http://ollama:11434'
+      - 'RAG_RERANKING_MODEL=BAAI/bge-reranker-v2-m3'
+      - 'RAG_TOP_K=20'
+      - 'RAG_TOP_K_RERANKER=10'
+      - 'ENABLE_RAG_HYBRID_SEARCH=true'
+      - 'RAG_HYBRID_BM25_WEIGHT=0.5'
+      # Optional: HF_TOKEN lifts HuggingFace rate limits when downloading the
+      # reranker on first boot. Provide via host env or a .env file alongside
+      # this compose; never hardcode here.
+      - 'HF_TOKEN=${HF_TOKEN:-}'
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped

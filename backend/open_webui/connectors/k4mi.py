@@ -10,6 +10,7 @@ own document loaders to process.
 """
 
 import hashlib
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -41,6 +42,12 @@ class K4miConnector(BaseConnector):
         self.tag_filter = config.get("tag_filter") or []
         self.correspondent_filter = config.get("correspondent_filter") or []
         self.document_type_filter = config.get("document_type_filter") or []
+        # Catalog caches, lazily populated. K4mi doc payloads only carry numeric
+        # ids for custom fields and tags; we resolve them to human-readable
+        # names so the indexed text contains searchable strings like
+        # "invoice_client: George V" instead of opaque field/tag ids.
+        self._custom_field_map: Optional[dict[int, dict]] = None
+        self._tag_map: Optional[dict[int, str]] = None
 
     def _headers(self) -> dict:
         return {"Authorization": f"Token {self.api_token}"}
@@ -68,6 +75,59 @@ class K4miConnector(BaseConnector):
             )
             resp.raise_for_status()
             return resp.content
+
+    async def _ensure_catalogs(self) -> None:
+        """Lazy-fetch K4mi's custom-field and tag catalogs once per process.
+
+        K4mi document payloads carry only numeric ids; the indexed text needs
+        readable names so retrieval can match on "invoice_client", "bc_full_name",
+        etc. Failures are logged and tolerated — missing catalogs degrade
+        gracefully to ids in the output."""
+        if self._custom_field_map is None:
+            try:
+                data = await self._api_get(
+                    "/custom_fields/", params={"page_size": 500}
+                )
+                self._custom_field_map = {
+                    f["id"]: f for f in data.get("results", [])
+                }
+            except Exception as e:
+                log.warning("Failed to fetch K4mi custom_fields catalog: %s", e)
+                self._custom_field_map = {}
+        if self._tag_map is None:
+            try:
+                data = await self._api_get("/tags/", params={"page_size": 500})
+                self._tag_map = {t["id"]: t["name"] for t in data.get("results", [])}
+            except Exception as e:
+                log.warning("Failed to fetch K4mi tags catalog: %s", e)
+                self._tag_map = {}
+
+    def _serialize_custom_fields(self, custom_fields) -> list[str]:
+        """Render K4mi custom_fields as 'name: value' lines.
+
+        K4mi stores per-document fields as [{"field": <id>, "value": <any>}, ...].
+        We resolve <id> to the field name via the catalog so the indexed text
+        contains queryable strings (e.g. 'invoice_client: George V')."""
+        if not custom_fields or not isinstance(custom_fields, list):
+            return []
+        if not self._custom_field_map:
+            return []
+        lines = []
+        for cf in custom_fields:
+            if not isinstance(cf, dict):
+                continue
+            field_id = cf.get("field")
+            value = cf.get("value")
+            if value is None or value == "" or value == []:
+                continue
+            field_meta = self._custom_field_map.get(field_id)
+            if not field_meta:
+                continue
+            name = field_meta.get("name") or f"field_{field_id}"
+            if isinstance(value, (list, dict)):
+                value = json.dumps(value, ensure_ascii=False)
+            lines.append(f"{name}: {value}")
+        return lines
 
     def _build_filters(self) -> dict:
         """Build query params for Paperless document list filtering."""
@@ -118,9 +178,18 @@ class K4miConnector(BaseConnector):
 
             for doc in results:
                 content_text = doc.get("content", "")
+                # Hash content + modified + custom_fields so user edits to
+                # custom fields (no OCR change) still invalidate the cached
+                # chunk and trigger a re-index. Otherwise a doc whose OCR text
+                # never changes is permanently stuck with stale field data.
+                hash_input = "".join([
+                    content_text or "",
+                    str(doc.get("modified") or ""),
+                    json.dumps(doc.get("custom_fields") or [], sort_keys=True, ensure_ascii=False),
+                ])
                 content_hash = (
-                    hashlib.sha256(content_text.encode()).hexdigest()[:16]
-                    if content_text
+                    hashlib.sha256(hash_input.encode()).hexdigest()[:16]
+                    if hash_input
                     else None
                 )
                 docs.append(
@@ -149,8 +218,11 @@ class K4miConnector(BaseConnector):
         return docs
 
     async def fetch_document(self, external_id: str) -> DocumentContent:
+        await self._ensure_catalogs()
         doc_id = int(external_id)
-        doc = await self._api_get(f"/documents/{doc_id}/")
+        doc = await self._api_get(
+            f"/documents/{doc_id}/", params={"full_perms": "true"}
+        )
 
         title = doc.get("title", f"Document {doc_id}")
         original_name = doc.get("original_file_name", "")
@@ -172,12 +244,22 @@ class K4miConnector(BaseConnector):
             meta_lines.append(f"Added: {doc['added'][:10]}")
         if doc.get("archive_serial_number"):
             meta_lines.append(f"Archive serial number (ASN): {doc['archive_serial_number']}")
-        # Resolve tag names — Paperless returns tag IDs in doc, but tag_names might be available
-        tag_names = doc.get("tag_names") or []
+        # Resolve tag names. The list-endpoint payload often omits tag_names;
+        # use the cached catalog to translate the always-present id list.
+        tag_ids = doc.get("tags") or []
+        tag_names = doc.get("tag_names") or [
+            self._tag_map.get(tid) for tid in tag_ids if self._tag_map
+        ]
+        tag_names = [t for t in tag_names if t]
         if tag_names:
             meta_lines.append(f"Tags: {', '.join(tag_names)}")
-        elif doc.get("tags"):
-            meta_lines.append(f"Tag IDs: {', '.join(str(t) for t in doc['tags'])}")
+        elif tag_ids:
+            meta_lines.append(f"Tag IDs: {', '.join(str(t) for t in tag_ids)}")
+        # Custom fields are the primary store for structured metadata
+        # (invoice_client, invoice_vendor, bc_full_name, bc_company, ...).
+        # Emit one line per populated field so retrieval can match on names
+        # users actually search for.
+        meta_lines.extend(self._serialize_custom_fields(doc.get("custom_fields")))
         if doc.get("notes"):
             for note in doc["notes"][:3]:
                 note_text = note if isinstance(note, str) else note.get("note", "")

@@ -166,3 +166,6 @@ export const syncBusinessCardFromK4mi = async (
 	);
 	return asJson(res);
 };
+
+export const getBusinessCardPreviewUrl = (id: number): string =>
+	`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}/preview`;

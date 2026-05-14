@@ -34,13 +34,25 @@ def _hash(text: str) -> str:
 # ── Serializers: structured records → natural-language text ──────────
 
 
-def _serialize_invoice(inv: dict) -> str:
-    """Convert an invoice record into embedding-friendly text."""
+def _serialize_invoice(inv: dict, company_name_map: Optional[dict] = None) -> str:
+    """Convert an invoice record into embedding-friendly text.
+
+    `company_name_map` resolves `inv['company_id']` to the assigned-company
+    name. The vendor/client on the invoice document is independent of the
+    company the invoice is *booked to* in our books, so without this lookup
+    queries like "invoices for Moltov Ltd." can't find anything — Moltov's
+    name never appears in any individual invoice's text otherwise."""
     lines = []
     lines.append(f"Invoice #{inv.get('invoice_number', 'N/A')} from {inv.get('vendor_name', 'Unknown vendor')}")
 
     if inv.get("client_name"):
         lines.append(f"Client: {inv['client_name']}")
+
+    company_id = inv.get("company_id")
+    if company_id and company_name_map:
+        company_name = company_name_map.get(company_id)
+        if company_name:
+            lines.append(f"Assigned to company: {company_name}")
 
     date_parts = []
     if inv.get("invoice_date"):
@@ -197,6 +209,9 @@ class InvoiceDBConnector(BaseConnector):
         self.include_transactions = config.get("include_transactions", True)
         self.include_payments = config.get("include_payments", True)
         self.include_company_summaries = config.get("include_company_summaries", True)
+        # Lazy cache: company_id → company_name. Used by _serialize_invoice
+        # to surface the assigned-company on each invoice's indexed text.
+        self._company_name_map: Optional[dict[int, str]] = None
 
     async def _api_get(self, path: str, params: Optional[dict] = None) -> dict:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -227,6 +242,25 @@ class InvoiceDBConnector(BaseConnector):
             companies = [c for c in companies if c.get("id") in self.company_ids]
         return companies
 
+    async def _ensure_company_name_map(self) -> dict[int, str]:
+        """Fetch & cache an id → name map covering ALL companies (not just the
+        configured filter), so invoices assigned to any company can resolve
+        their assignment in the serializer."""
+        if self._company_name_map is not None:
+            return self._company_name_map
+        try:
+            data = await self._api_get("/api/accounting/companies")
+            all_companies = self._extract_list(data)
+            self._company_name_map = {
+                c["id"]: c.get("name", f"Company {c['id']}")
+                for c in all_companies
+                if c.get("id") is not None
+            }
+        except Exception as e:
+            log.warning("Failed to fetch companies for name map: %s", e)
+            self._company_name_map = {}
+        return self._company_name_map
+
     async def list_documents(
         self, since: Optional[datetime] = None
     ) -> list[ExternalDocument]:
@@ -235,6 +269,7 @@ class InvoiceDBConnector(BaseConnector):
 
         # Invoices
         if self.include_invoices:
+            company_name_map = await self._ensure_company_name_map()
             params = {}
             if since_str:
                 params["updated_after"] = since_str
@@ -242,7 +277,7 @@ class InvoiceDBConnector(BaseConnector):
                 data = await self._api_get("/api/invoices", params=params)
                 invoices = self._extract_list(data)
                 for inv in invoices:
-                    text = _serialize_invoice(inv)
+                    text = _serialize_invoice(inv, company_name_map)
                     docs.append(ExternalDocument(
                         external_id=f"invoice:{inv['id']}",
                         title=f"Invoice #{inv.get('invoice_number', inv['id'])} — {inv.get('vendor_name', 'Unknown')}",
@@ -321,7 +356,8 @@ class InvoiceDBConnector(BaseConnector):
         if record_type == "invoice":
             inv_id = parts[1]
             inv = await self._api_get(f"/api/invoices/{inv_id}")
-            text = _serialize_invoice(inv)
+            company_name_map = await self._ensure_company_name_map()
+            text = _serialize_invoice(inv, company_name_map)
             return DocumentContent(
                 external_id=external_id,
                 title=f"Invoice #{inv.get('invoice_number', inv_id)} — {inv.get('vendor_name', 'Unknown')}",
