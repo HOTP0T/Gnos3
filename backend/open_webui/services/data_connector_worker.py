@@ -29,6 +29,19 @@ async def data_connector_sync_worker(app) -> None:
     """
     log.info("Data connector sync worker started")
 
+    # Recover any connector left in `running` state by a prior process death
+    # (container restart, crash mid-sync). The loop below explicitly skips
+    # `running` rows, so without this reset they'd be stuck forever.
+    try:
+        reset = DataConnectors.reset_running_connectors()
+        if reset:
+            log.warning(
+                "Reset %d orphaned 'running' connector(s) from prior shutdown",
+                reset,
+            )
+    except Exception as e:
+        log.exception("Failed to reset orphaned 'running' connectors: %s", e)
+
     # Wait a bit for the app to fully initialize
     await asyncio.sleep(10)
 

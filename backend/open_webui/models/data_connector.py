@@ -258,6 +258,31 @@ class DataConnectorTable:
             db.refresh(connector)
             return DataConnectorModel.model_validate(connector)
 
+    def reset_running_connectors(self, db: Optional[Session] = None) -> int:
+        """Flip any connector stuck at last_sync_status='running' to 'failed'.
+
+        The worker is the only thing that sets `running`, and it cleans up to
+        `success`/`failed` when a sync ends. So any row in `running` at process
+        start is the orphan of a sync that was killed mid-flight (container
+        restart, crash). The worker explicitly skips `running` rows, so without
+        this reset the connector is stuck forever.
+        """
+        with get_db_context(db) as db:
+            count = (
+                db.query(DataConnector)
+                .filter_by(last_sync_status="running")
+                .update(
+                    {
+                        "last_sync_status": "failed",
+                        "last_sync_error": "reset: orphaned running state at startup",
+                        "updated_at": int(time.time()),
+                    },
+                    synchronize_session=False,
+                )
+            )
+            db.commit()
+            return count
+
     def set_connector_knowledge_id(
         self,
         connector_id: str,
