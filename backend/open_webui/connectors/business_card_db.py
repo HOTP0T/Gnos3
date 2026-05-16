@@ -163,9 +163,44 @@ class BusinessCardDBConnector(BaseConnector):
         company = bc.get("company_name")
         return f"{name} — {company}" if company else name
 
+    async def _reconcile_notes(self) -> None:
+        """Ask bc-api to refresh k4mi_notes for every BC before we list.
+
+        Workaround for K4mi not firing document-updated webhooks on
+        note-only changes — without this call, notes added in K4mi
+        never reach bc-api's DB, and we'd index stale rows here.
+        Best-effort: failure logs and we proceed with whatever bc-api has.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(
+                    f"{self.api_base}/api/business-cards/reconcile-notes"
+                )
+                if resp.status_code == 200:
+                    summary = resp.json()
+                    log.info(
+                        "BC reconcile-notes: total=%s updated=%s errors=%s",
+                        summary.get("total"),
+                        summary.get("updated"),
+                        summary.get("errors"),
+                    )
+                else:
+                    log.warning(
+                        "BC reconcile-notes returned %s: %s",
+                        resp.status_code, resp.text[:200],
+                    )
+        except Exception as e:
+            log.warning("BC reconcile-notes failed (continuing): %s", e)
+
     async def list_documents(
         self, since: Optional[datetime] = None
     ) -> list[ExternalDocument]:
+        # Pull the latest notes from K4mi into bc-api first. Notes don't
+        # arrive via the document-updated webhook (Paperless doesn't fire
+        # it on note-only writes), so if we skip this the connector indexes
+        # whatever stale notes bc-api happens to have.
+        await self._reconcile_notes()
+
         docs: list[ExternalDocument] = []
 
         offset = 0
