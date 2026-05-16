@@ -157,6 +157,11 @@ class K4miConnector(BaseConnector):
                 "page": page,
                 "page_size": PAGE_SIZE,
                 "ordering": "-modified",
+                # full_perms makes Paperless return the `notes` array (and
+                # owner/permissions) in the list payload. Without it, notes
+                # are stripped, the hash below can't see note changes, and
+                # adding/editing a note silently fails to trigger a re-sync.
+                "full_perms": "true",
                 **self._build_filters(),
             }
             if since:
@@ -178,14 +183,16 @@ class K4miConnector(BaseConnector):
 
             for doc in results:
                 content_text = doc.get("content", "")
-                # Hash content + modified + custom_fields so user edits to
-                # custom fields (no OCR change) still invalidate the cached
-                # chunk and trigger a re-index. Otherwise a doc whose OCR text
-                # never changes is permanently stuck with stale field data.
+                # Hash content + modified + custom_fields + notes so user edits
+                # to any of them invalidate the cached chunk and trigger a
+                # re-index. Without notes here, adding a note in K4mi never
+                # changed the hash (Paperless doesn't bump `modified` on note
+                # writes), so the sync silently skipped the note.
                 hash_input = "".join([
                     content_text or "",
                     str(doc.get("modified") or ""),
                     json.dumps(doc.get("custom_fields") or [], sort_keys=True, ensure_ascii=False),
+                    json.dumps(doc.get("notes") or [], sort_keys=True, default=str),
                 ])
                 content_hash = (
                     hashlib.sha256(hash_input.encode()).hexdigest()[:16]
