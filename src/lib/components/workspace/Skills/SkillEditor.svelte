@@ -7,7 +7,7 @@
 	import LockClosed from '$lib/components/icons/LockClosed.svelte';
 	import ChevronLeft from '$lib/components/icons/ChevronLeft.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 	import { slugify, parseFrontmatter, formatSkillName } from '$lib/utils';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import { updateSkillAccessGrants } from '$lib/apis/skills';
@@ -112,9 +112,9 @@
 	bind:show={showAccessControlModal}
 	bind:accessGrants
 	accessRoles={['read', 'write']}
-	share={$user?.permissions?.sharing?.skills || $user?.role === 'admin'}
-	sharePublic={$user?.permissions?.sharing?.public_skills || $user?.role === 'admin'}
-	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+	share={$user?.permissions?.sharing?.skills || $isAdmin}
+	sharePublic={$user?.permissions?.sharing?.public_skills || $isAdmin}
+	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $isAdmin}
 	onChange={async () => {
 		if (edit && skill?.id) {
 			try {

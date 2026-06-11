@@ -37,8 +37,8 @@
 		showFileNavPath,
 		showFileNavDir,
 		pyodideWorker,
-		desktopEvent
-	} from '$lib/stores';
+		desktopEvent,
+		isAdmin} from '$lib/stores';
 	import { getFileContentById } from '$lib/apis/files';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -807,7 +807,7 @@
 		if (!token) return;
 
 		// Only admins can modify system-level connections
-		if ($user?.role !== 'admin') return;
+		if (!$isAdmin) return;
 
 		try {
 			if (event.type === 'connections:terminal') {

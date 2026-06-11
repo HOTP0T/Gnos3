@@ -276,7 +276,7 @@ async def generate_function_chat_completion(request, form_data, user, models: di
             form_data['model'] = model_info.base_model_id
 
         if not BYPASS_MODEL_ACCESS_CONTROL:
-            bypass = isinstance(user, UserModel) and user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL
+            bypass = isinstance(user, UserModel) and user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL
             await check_model_access(user if isinstance(user, UserModel) else UserModel(**user), model_info, bypass)
 
         params = model_info.params.model_dump()

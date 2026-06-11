@@ -400,7 +400,7 @@ async def export_chat_stats(
     user=Depends(get_verified_user),
 ):
     # Check if the user has permission to share/export chats
-    if (user.role != 'admin') and (not request.app.state.config.ENABLE_COMMUNITY_SHARING):
+    if (user.role not in ('admin', 'superadmin')) and (not request.app.state.config.ENABLE_COMMUNITY_SHARING):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -449,7 +449,7 @@ async def export_single_chat_stats(
     Returns ChatStatsExport for the specified chat.
     """
     # Check if the user has permission to share/export chats
-    if (user.role != 'admin') and (not request.app.state.config.ENABLE_COMMUNITY_SHARING):
+    if (user.role not in ('admin', 'superadmin')) and (not request.app.state.config.ENABLE_COMMUNITY_SHARING):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -465,7 +465,7 @@ async def export_single_chat_stats(
             )
 
         # Verify the chat belongs to the user (unless admin)
-        if chat.user_id != user.id and user.role != 'admin':
+        if chat.user_id != user.id and user.role not in ('admin', 'superadmin'):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -829,7 +829,7 @@ async def get_shared_chat_by_id(
     if user.role == 'pending':
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role == 'admin' and ENABLE_ADMIN_CHAT_ACCESS:
+    if user.role in ('admin', 'superadmin') and ENABLE_ADMIN_CHAT_ACCESS:
         chat = await Chats.get_chat_by_id(share_id, db=db)
     else:
         chat = await Chats.get_chat_by_share_id(share_id, db=db)
@@ -896,7 +896,7 @@ async def get_chat_by_id(id: str, user=Depends(get_verified_user), db: AsyncSess
 
     if not chat:
         # Check if user has access via access grants (shared_chat grants)
-        if user.role == 'admin' and ENABLE_ADMIN_CHAT_ACCESS:
+        if user.role in ('admin', 'superadmin') and ENABLE_ADMIN_CHAT_ACCESS:
             chat = await Chats.get_chat_by_id(id, db=db)
         else:
             has_grant = await AccessGrants.has_access(
@@ -962,7 +962,7 @@ async def update_chat_message_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    if chat.user_id != user.id and user.role != 'admin':
+    if chat.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -1024,7 +1024,7 @@ async def send_chat_message_event_by_id(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    if chat.user_id != user.id and user.role != 'admin':
+    if chat.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -1060,7 +1060,7 @@ async def delete_chat_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         chat = await Chats.get_chat_by_id(id, db=db)
         if not chat:
             raise HTTPException(
@@ -1183,7 +1183,7 @@ async def clone_chat_by_id(
 async def clone_shared_chat_by_id(
     id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         chat = await Chats.get_chat_by_id(id, db=db)
     else:
         chat = await Chats.get_chat_by_share_id(id, db=db)
@@ -1196,7 +1196,7 @@ async def clone_shared_chat_by_id(
 
     # Enforce access grants
     shared = await SharedChats.get_by_id(id, db=db)
-    if shared and user.role != 'admin':
+    if shared and user.role not in ('admin', 'superadmin'):
         has_grant = await AccessGrants.has_access(
             user_id=user.id,
             resource_type='shared_chat',
@@ -1278,7 +1278,7 @@ async def share_chat_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if (user.role != 'admin') and (
+    if (user.role not in ('admin', 'superadmin')) and (
         not await has_permission(user.id, 'chat.share', request.app.state.config.USER_PERMISSIONS)
     ):
         raise HTTPException(
@@ -1372,7 +1372,7 @@ async def update_shared_chat_access_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if chat.user_id != user.id and user.role != 'admin':
+    if chat.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -1409,7 +1409,7 @@ async def get_shared_chat_access_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if chat.user_id != user.id and user.role != 'admin':
+    if chat.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,

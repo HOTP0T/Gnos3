@@ -3,7 +3,7 @@
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 	import { imageGenerations, imageEdits } from '$lib/apis/images';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -113,7 +113,7 @@
 	};
 
 	onMount(async () => {
-		if ($user?.role !== 'admin') {
+		if (!$isAdmin) {
 			await goto('/');
 			return;
 		}

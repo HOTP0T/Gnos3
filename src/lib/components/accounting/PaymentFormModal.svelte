@@ -5,7 +5,7 @@
 	import { flyAndScale } from '$lib/utils/transitions';
 
 	import { createPayment } from '$lib/apis/accounting';
-	import { K4MI_BASE_URL } from '$lib/constants';
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import InvoiceSelector from '$lib/components/accounting/InvoiceSelector.svelte';
 
 	const i18n = getContext('i18n');
@@ -34,7 +34,7 @@
 	let saving = false;
 	let showInvoiceSelector = false;
 	let invoiceLabel = '';
-	let invoiceK4miUrl = '';
+	let invoiceK4miDocId: number | null = null;
 
 	// Custom payment methods (persisted in localStorage)
 	const CUSTOM_METHODS_KEY = 'accounting-custom-payment-methods';
@@ -200,7 +200,7 @@
 		invoiceLabel = inv.invoice_number
 			? `${inv.invoice_number} — ${inv.vendor_name ?? ''}`
 			: `#${inv.id} — ${inv.vendor_name ?? ''}`;
-		invoiceK4miUrl = inv.k4mi_document_id ? `${K4MI_BASE_URL}/documents/${inv.k4mi_document_id}/details` : '';
+		invoiceK4miDocId = inv.k4mi_document_id ?? null;
 		if (inv.vendor_name && direction === 'outbound' && !payee) payee = inv.vendor_name;
 		if (inv.vendor_name && direction === 'inbound' && !payer) payer = inv.vendor_name;
 		if (inv.total_amount && !amount) amount = parseFloat(String(inv.total_amount));
@@ -395,14 +395,14 @@
 						<div class="flex items-center gap-2">
 							{#if invoiceLabel}
 								<span class="text-sm dark:text-gray-200 flex-1 truncate">{invoiceLabel}</span>
-								{#if invoiceK4miUrl}
-									<a href={invoiceK4miUrl} target="_blank" rel="noopener" class="text-blue-500 hover:text-blue-700 flex-shrink-0" title={$i18n.t('Open in K4mi')}>
+								{#if invoiceK4miDocId}
+									<K4miDocLink docId={invoiceK4miDocId} extraClass="text-blue-500 hover:text-blue-700 flex-shrink-0" title={$i18n.t('Open in K4mi')}>
 										<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3.5 h-3.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
-									</a>
+									</K4miDocLink>
 								{/if}
 								<button
 									class="text-xs text-red-500 hover:text-red-700 transition whitespace-nowrap"
-									on:click={() => { invoice_id = null; invoiceLabel = ''; invoiceK4miUrl = ''; }}
+									on:click={() => { invoice_id = null; invoiceLabel = ''; invoiceK4miDocId = null; }}
 									type="button"
 								>
 									{$i18n.t('Remove')}

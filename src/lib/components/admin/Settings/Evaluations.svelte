@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import { models, settings, user, config } from '$lib/stores';
+	import { models, settings, user, config, isAdmin} from '$lib/stores';
 	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
 
 	const dispatch = createEventDispatcher();
@@ -77,7 +77,7 @@
 	};
 
 	onMount(async () => {
-		if ($user?.role === 'admin') {
+		if ($isAdmin) {
 			evaluationConfig = await getConfig(localStorage.token).catch((err) => {
 				toast.error(err);
 				return null;

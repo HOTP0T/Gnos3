@@ -11,7 +11,7 @@
 		expenseSheetPdfUrl,
 		expenseSheetExcelUrl
 	} from '$lib/apis/accounting';
-	import { K4MI_BASE_URL } from '$lib/constants';
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ExpenseSheetStatusBadge from './ExpenseSheetStatusBadge.svelte';
 
@@ -139,8 +139,8 @@
 		}
 	};
 
-	const k4miLink = (id: number | null | undefined) =>
-		id ? `${K4MI_BASE_URL}/documents/${id}/details` : null;
+	// SSO bridge handles the URL; we just need to know whether a doc id exists.
+	const hasK4miDoc = (id: number | null | undefined) => !!id;
 </script>
 
 {#if loading}
@@ -387,13 +387,8 @@
 									>{money(l.total_amount, l.currency)}</td
 								>
 								<td class="py-2 px-3 text-right">
-									{#if k4miLink(l.k4mi_document_id)}
-										<a
-											href={k4miLink(l.k4mi_document_id)}
-											target="_blank"
-											rel="noopener"
-											class="text-xs text-blue-600 hover:text-blue-700">#{l.k4mi_document_id}</a
-										>
+									{#if hasK4miDoc(l.k4mi_document_id)}
+										<K4miDocLink docId={l.k4mi_document_id} extraClass="text-xs text-blue-600 hover:text-blue-700">#{l.k4mi_document_id}</K4miDocLink>
 									{/if}
 								</td>
 								<td class="py-2 px-3 text-right">
@@ -474,13 +469,8 @@
 											>{money(inv.total_amount, inv.currency)}</td
 										>
 										<td class="py-1 px-2 text-right">
-											{#if k4miLink(inv.k4mi_document_id)}
-												<a
-													href={k4miLink(inv.k4mi_document_id)}
-													target="_blank"
-													rel="noopener"
-													class="text-blue-600 hover:text-blue-700">#{inv.k4mi_document_id}</a
-												>
+											{#if hasK4miDoc(inv.k4mi_document_id)}
+												<K4miDocLink docId={inv.k4mi_document_id} extraClass="text-blue-600 hover:text-blue-700">#{inv.k4mi_document_id}</K4miDocLink>
 											{/if}
 										</td>
 									</tr>

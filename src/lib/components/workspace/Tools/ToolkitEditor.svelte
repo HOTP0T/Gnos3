@@ -5,7 +5,7 @@
 	const i18n = getContext('i18n');
 
 	import { goto } from '$app/navigation';
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 	import { updateToolAccessGrants } from '$lib/apis/tools';
 
 	import { nameToId } from '$lib/utils';
@@ -192,9 +192,9 @@ class Tools:
 	bind:show={showAccessControlModal}
 	bind:accessGrants
 	accessRoles={['read', 'write']}
-	share={$user?.permissions?.sharing?.tools || $user?.role === 'admin'}
-	sharePublic={$user?.permissions?.sharing?.public_tools || $user?.role === 'admin'}
-	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+	share={$user?.permissions?.sharing?.tools || $isAdmin}
+	sharePublic={$user?.permissions?.sharing?.public_tools || $isAdmin}
+	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $isAdmin}
 	onChange={async () => {
 		if (edit && id) {
 			try {

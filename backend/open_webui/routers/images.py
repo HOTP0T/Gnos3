@@ -512,7 +512,7 @@ async def generate_images(request: Request, form_data: CreateImageForm, user=Dep
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.image_generation', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(

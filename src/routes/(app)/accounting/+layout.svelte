@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
-	import { WEBUI_NAME, mobile, showSidebar } from '$lib/stores';
+	import { goto } from '$app/navigation';
+	import { WEBUI_NAME, mobile, showSidebar, user, isAdmin} from '$lib/stores';
 	import { page } from '$app/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
@@ -8,7 +9,15 @@
 	const i18n = getContext('i18n');
 	let loaded = false;
 
+	// RBAC: client-side guard. API enforces this too — this is UX polish.
 	onMount(async () => {
+		const canAccess =
+			$isAdmin ||
+			Boolean($user?.permissions?.modules?.accounting?.read);
+		if (!canAccess) {
+			await goto('/');
+			return;
+		}
 		loaded = true;
 	});
 </script>

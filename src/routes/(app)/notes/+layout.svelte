@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
-	import { WEBUI_NAME, showSidebar, functions, config, user, showArchivedChats } from '$lib/stores';
+	import { WEBUI_NAME, showSidebar, functions, config, user, showArchivedChats, isAdmin} from '$lib/stores';
 	import { goto } from '$app/navigation';
 
 	const i18n = getContext('i18n');
@@ -11,7 +11,7 @@
 		if (
 			!(
 				($config?.features?.enable_notes ?? false) &&
-				($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
+				($isAdmin || ($user?.permissions?.features?.notes ?? true))
 			)
 		) {
 			// If the feature is not enabled, redirect to the home page

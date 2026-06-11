@@ -1566,7 +1566,7 @@ async def process_file(
     Note: granular session management is used to prevent connection pool exhaustion.
     The session is committed before external API calls, and updates use a fresh session.
     """
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         file = await Files.get_file_by_id(form_data.file_id, db=db)
     else:
         file = await Files.get_file_by_id_and_user_id(form_data.file_id, user.id, db=db)
@@ -2183,7 +2183,7 @@ async def process_web_search(request: Request, form_data: SearchForm, user=Depen
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.web_search', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(
@@ -2636,7 +2636,7 @@ async def process_files_batch(
                     )
                 )
                 continue
-            if db_file.user_id != user.id and user.role != 'admin':
+            if db_file.user_id != user.id and user.role not in ('admin', 'superadmin'):
                 file_errors.append(
                     BatchProcessFilesResult(
                         file_id=file.id,

@@ -6,7 +6,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import DocumentDuplicate from '$lib/components/icons/DocumentDuplicate.svelte';
 	import Download from '$lib/components/icons/Download.svelte';
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 
 	const i18n = getContext('i18n');
 
@@ -69,7 +69,7 @@
 				<div class="flex items-center">{$i18n.t('Clone')}</div>
 			</button>
 
-			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
+			{#if $isAdmin || $user?.permissions?.workspace?.skills}
 				<button
 					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {

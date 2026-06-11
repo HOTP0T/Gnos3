@@ -8,7 +8,7 @@
 	import Clipboard from '$lib/components/icons/Clipboard.svelte';
 	import Check from '$lib/components/icons/Check.svelte';
 	import AccessControlModal from '../common/AccessControlModal.svelte';
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 	import { slugify, formatDate, copyToClipboard } from '$lib/utils';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -285,9 +285,9 @@
 	bind:show={showAccessControlModal}
 	bind:accessGrants
 	accessRoles={['read', 'write']}
-	share={$user?.permissions?.sharing?.prompts || $user?.role === 'admin'}
-	sharePublic={$user?.permissions?.sharing?.public_prompts || $user?.role === 'admin'}
-	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+	share={$user?.permissions?.sharing?.prompts || $isAdmin}
+	sharePublic={$user?.permissions?.sharing?.public_prompts || $isAdmin}
+	shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $isAdmin}
 	onChange={async () => {
 		if (edit && prompt?.id) {
 			try {

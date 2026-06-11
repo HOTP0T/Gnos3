@@ -1632,7 +1632,7 @@ async def search_knowledge_files(
                     continue
 
                 if not (
-                    user_role == 'admin'
+                    user_role in ('admin', 'superadmin')
                     or knowledge.user_id == user_id
                     or await AccessGrants.has_access(
                         user_id=user_id,
@@ -1775,7 +1775,7 @@ async def view_file(
 
         if (
             file.user_id != user_id
-            and user_role != 'admin'
+            and user_role not in ('admin', 'superadmin')
             and not any(
                 item.get('type') == 'file' and item.get('id') == file_id for item in (__model_knowledge__ or [])
             )
@@ -1874,7 +1874,7 @@ async def view_knowledge_file(
 
         for knowledge_base in knowledges:
             if (
-                user_role == 'admin'
+                user_role in ('admin', 'superadmin')
                 or knowledge_base.user_id == user_id
                 or await AccessGrants.has_access(
                     user_id=user_id,
@@ -1889,7 +1889,7 @@ async def view_knowledge_file(
                 break
 
         if not has_knowledge_access:
-            if file.user_id != user_id and user_role != 'admin':
+            if file.user_id != user_id and user_role not in ('admin', 'superadmin'):
                 return json.dumps({'error': 'Access denied'})
 
         content = ''
@@ -1966,7 +1966,7 @@ async def list_knowledge(
             if item_type == 'collection':
                 knowledge = await Knowledges.get_knowledge_by_id(item_id)
                 if knowledge and (
-                    user_role == 'admin'
+                    user_role in ('admin', 'superadmin')
                     or knowledge.user_id == user_id
                     or await AccessGrants.has_access(
                         user_id=user_id,
@@ -2006,7 +2006,7 @@ async def list_knowledge(
             elif item_type == 'note':
                 note = await Notes.get_note_by_id(item_id)
                 if note and (
-                    user_role == 'admin'
+                    user_role in ('admin', 'superadmin')
                     or note.user_id == user_id
                     or await AccessGrants.has_access(
                         user_id=user_id,
@@ -2105,7 +2105,7 @@ async def query_knowledge_files(
                     # Knowledge base - use KB ID as collection name
                     knowledge = await Knowledges.get_knowledge_by_id(item_id)
                     if knowledge and (
-                        user_role == 'admin'
+                        user_role in ('admin', 'superadmin')
                         or knowledge.user_id == user_id
                         or await AccessGrants.has_access(
                             user_id=user_id,
@@ -2127,7 +2127,7 @@ async def query_knowledge_files(
                     # Note - always return full content as context
                     note = await Notes.get_note_by_id(item_id)
                     if note and (
-                        user_role == 'admin'
+                        user_role in ('admin', 'superadmin')
                         or note.user_id == user_id
                         or await AccessGrants.has_access(
                             user_id=user_id,
@@ -2151,7 +2151,7 @@ async def query_knowledge_files(
             for knowledge_id in knowledge_ids:
                 knowledge = await Knowledges.get_knowledge_by_id(knowledge_id)
                 if knowledge and (
-                    user_role == 'admin'
+                    user_role in ('admin', 'superadmin')
                     or knowledge.user_id == user_id
                     or await AccessGrants.has_access(
                         user_id=user_id,
@@ -2352,7 +2352,7 @@ async def view_skill(
 
         # Check user access
         user_role = __user__.get('role', 'user')
-        if user_role != 'admin' and skill.user_id != user_id:
+        if user_role not in ('admin', 'superadmin') and skill.user_id != user_id:
             user_group_ids = [group.id for group in await Groups.get_groups_by_member_id(user_id)]
             if not await AccessGrants.has_access(
                 user_id=user_id,
@@ -3057,7 +3057,7 @@ async def create_calendar_event(
         cal = await Calendars.get_calendar_by_id(calendar_id)
         if not cal:
             return json.dumps({'error': 'Calendar not found'})
-        if cal.user_id != user_id and __user__.get('role') != 'admin':
+        if cal.user_id != user_id and __user__.get('role') not in ('admin', 'superadmin'):
             from open_webui.models.access_grants import AccessGrants
             from open_webui.models.groups import Groups
 
@@ -3178,7 +3178,7 @@ async def update_calendar_event(
 
         # Check write access to the event's calendar
         cal = await Calendars.get_calendar_by_id(event.calendar_id)
-        if cal and cal.user_id != user_id and __user__.get('role') != 'admin':
+        if cal and cal.user_id != user_id and __user__.get('role') not in ('admin', 'superadmin'):
             user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id)]
             if not await AccessGrants.has_access(
                 user_id=user_id,
@@ -3279,7 +3279,7 @@ async def delete_calendar_event(
 
         # Check write access
         cal = await Calendars.get_calendar_by_id(event.calendar_id)
-        if cal and cal.user_id != user_id and __user__.get('role') != 'admin':
+        if cal and cal.user_id != user_id and __user__.get('role') not in ('admin', 'superadmin'):
             user_group_ids = [g.id for g in await Groups.get_groups_by_member_id(user_id)]
             if not await AccessGrants.has_access(
                 user_id=user_id,

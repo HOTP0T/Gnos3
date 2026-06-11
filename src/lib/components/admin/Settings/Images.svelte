@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { createEventDispatcher, onMount, getContext } from 'svelte';
-	import { config as backendConfig, user } from '$lib/stores';
+	import { config as backendConfig, user, isAdmin} from '$lib/stores';
 
 	import { getBackendConfig } from '$lib/apis';
 	import {
@@ -209,7 +209,7 @@
 	};
 
 	onMount(async () => {
-		if ($user?.role === 'admin') {
+		if ($isAdmin) {
 			const res = await getConfig(localStorage.token).catch((error) => {
 				toast.error(`${error}`);
 				return null;

@@ -42,7 +42,7 @@ async def get_skills(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL:
         skills = await Skills.get_skills(db=db)
     else:
         user_group_ids = {group.id for group in await Groups.get_groups_by_member_id(user.id, db=db)}
@@ -88,7 +88,7 @@ async def get_skill_list(
     if view_option:
         filter['view_option'] = view_option
 
-    if not (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL):
+    if not (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL):
         groups = await Groups.get_groups_by_member_id(user.id, db=db)
         if groups:
             filter['group_ids'] = [group.id for group in groups]
@@ -102,7 +102,7 @@ async def get_skill_list(
             SkillAccessResponse(
                 **skill.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == skill.user_id
                     or await AccessGrants.has_access(
                         user_id=user.id,
@@ -130,7 +130,7 @@ async def export_skills(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id,
         'workspace.skills',
         request.app.state.config.USER_PERMISSIONS,
@@ -141,7 +141,7 @@ async def export_skills(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL:
         return await Skills.get_skills(db=db)
     else:
         return await Skills.get_skills_by_user_id(user.id, 'read', db=db)
@@ -159,7 +159,7 @@ async def create_new_skill(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'workspace.skills', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -204,7 +204,7 @@ async def get_skill_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
 
     if skill:
         if (
-            user.role == 'admin'
+            user.role in ('admin', 'superadmin')
             or skill.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -217,7 +217,7 @@ async def get_skill_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
             return SkillAccessResponse(
                 **skill.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == skill.user_id
                     or await AccessGrants.has_access(
                         user_id=user.id,
@@ -269,7 +269,7 @@ async def update_skill_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -330,7 +330,7 @@ async def update_skill_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -360,7 +360,7 @@ async def toggle_skill_by_id(id: str, user=Depends(get_verified_user), db: Async
     skill = await Skills.get_skill_by_id(id, db=db)
     if skill:
         if (
-            user.role == 'admin'
+            user.role in ('admin', 'superadmin')
             or skill.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -419,7 +419,7 @@ async def delete_skill_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

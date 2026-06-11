@@ -11,12 +11,20 @@ export interface ModulesResponse {
 }
 
 /** Returns the modules enabled on this deployment. Empty list if the
- * dispatcher is unreachable (treat as "no modules available"). */
+ * dispatcher is unreachable (treat as "no modules available").
+ *
+ * Sends Authorization header when a token is available — the dispatcher
+ * currently ignores it (Phase 1), but Phase 2 will filter modules by the
+ * caller's permissions, so the wiring needs to be in place. */
 export const getModules = async (): Promise<ModuleInfo[]> => {
+	const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
 	try {
 		const res = await fetch(`${DISPATCHER_API_BASE_URL}/api/modules`, {
 			method: 'GET',
-			headers: { 'Content-Type': 'application/json' }
+			headers: {
+				'Content-Type': 'application/json',
+				...(token ? { Authorization: `Bearer ${token}` } : {})
+			}
 		});
 		if (!res.ok) return [];
 		const data: ModulesResponse = await res.json();

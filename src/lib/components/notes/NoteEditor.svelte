@@ -37,8 +37,8 @@
 		socket,
 		user,
 		WEBUI_NAME,
-		pinnedNotes
-	} from '$lib/stores';
+		pinnedNotes,
+		isAdmin} from '$lib/stores';
 
 	import { downloadPdf } from './utils';
 
@@ -875,9 +875,9 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 		bind:show={showAccessControlModal}
 		bind:accessGrants={note.access_grants}
 		accessRoles={['read', 'write']}
-		share={$user?.permissions?.sharing?.notes || $user?.role === 'admin'}
-		sharePublic={$user?.permissions?.sharing?.public_notes || $user?.role === 'admin'}
-		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+		share={$user?.permissions?.sharing?.notes || $isAdmin}
+		sharePublic={$user?.permissions?.sharing?.public_notes || $isAdmin}
+		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $isAdmin}
 		onChange={async () => {
 			if (id) {
 				try {
@@ -948,7 +948,7 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 								type="text"
 								bind:value={note.title}
 								placeholder={titleGenerating ? $i18n.t('Generating...') : $i18n.t('Title')}
-								disabled={(note?.user_id !== $user?.id && $user?.role !== 'admin') ||
+								disabled={(note?.user_id !== $user?.id && !$isAdmin) ||
 									titleGenerating}
 								required
 								on:focus={() => {
@@ -974,7 +974,7 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 										<button
 											class=" self-center dark:hover:text-white transition"
 											id="generate-title-button"
-											disabled={(note?.user_id !== $user?.id && $user?.role !== 'admin') ||
+											disabled={(note?.user_id !== $user?.id && !$isAdmin) ||
 												titleGenerating}
 											on:mouseenter={() => {
 												ignoreBlur = true;
@@ -1110,7 +1110,7 @@ Provide the enhanced notes in markdown format. Use markdown syntax for headings,
 										on:click={() => {
 											showAccessControlModal = true;
 										}}
-										disabled={note?.user_id !== $user?.id && $user?.role !== 'admin'}
+										disabled={note?.user_id !== $user?.id && !$isAdmin}
 									>
 										<LockClosed strokeWidth="2.5" className="size-3.5" />
 										{$i18n.t('Access')}

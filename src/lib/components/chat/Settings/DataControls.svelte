@@ -9,8 +9,8 @@
 		settings,
 		scrollPaginationEnabled,
 		currentChatPage,
-		pinnedChats
-	} from '$lib/stores';
+		pinnedChats,
+		isAdmin} from '$lib/stores';
 
 	import {
 		archiveAllChats,
@@ -202,7 +202,7 @@
 				</div>
 			</div>
 
-			{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
+			{#if $isAdmin || ($user.permissions?.chat?.export ?? true)}
 				<div>
 					<div class="py-0.5 flex w-full justify-between">
 						<div class="self-center text-xs">{$i18n.t('Export Chats')}</div>

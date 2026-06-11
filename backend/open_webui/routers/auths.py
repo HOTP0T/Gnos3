@@ -65,6 +65,7 @@ from open_webui.utils.auth import (
     invalidate_token,
     create_api_key,
     create_token,
+    create_k4mi_exchange_token,
     get_admin_user,
     get_verified_user,
     get_current_user,
@@ -225,6 +226,39 @@ async def get_session_user(
         'status_message': user.status_message,
         'status_expires_at': user.status_expires_at,
         'permissions': user_permissions,
+    }
+
+
+############################
+# Resolved permissions (for external services)
+############################
+
+
+@router.get('/permissions/resolved')
+async def get_resolved_permissions(
+    request: Request,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """
+    Return the caller's identity + merged group permissions.
+
+    Consumed by the data-module APIs (invoice-processor, business-card-processor,
+    and any future module) so they can authorize requests using the same JWT
+    Gnos3 issued, without duplicating Gnos3's group-merging logic.
+
+    Reuses `access_control.get_permissions()` — same code path as the session
+    endpoint at GET /. Identity is included because Gnos3's JWT today only
+    carries `id`, so the modules need this endpoint to learn the caller's role
+    (for admin-bypass) and email/name (for audit logs).
+    """
+    permissions = await get_permissions(user.id, request.app.state.config.USER_PERMISSIONS, db=db)
+    return {
+        'id': user.id,
+        'email': user.email,
+        'name': user.name,
+        'role': user.role,
+        'permissions': permissions,
     }
 
 
@@ -510,10 +544,12 @@ async def ldap_auth(
                     if not user:
                         raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
 
-                    # Atomically check if this is the only user *after* the
-                    # insert.  Only the single user present should become admin.
+                    # Atomically check if this is the only user *after* the insert.
+                    # Phase 3.7 RBAC: the bootstrap LDAP user becomes 'superadmin'
+                    # (platform owner). See signup_handler() for the same logic in
+                    # the local-signup path.
                     if await Users.get_num_users(db=db) == 1:
-                        await Users.update_user_role_by_id(user.id, 'admin', db=db)
+                        await Users.update_user_role_by_id(user.id, 'superadmin', db=db)
                         user = await Users.get_user_by_id(user.id, db=db)
 
                     await apply_default_group_assignment(
@@ -602,7 +638,7 @@ async def signin(
 
             if WEBUI_AUTH_TRUSTED_ROLE_HEADER:
                 trusted_role = request.headers.get(WEBUI_AUTH_TRUSTED_ROLE_HEADER, '').lower().strip()
-                if trusted_role in {'admin', 'user', 'pending'}:
+                if trusted_role in {'admin', 'superadmin', 'user', 'pending'}:
                     if user.role != trusted_role:
                         await Users.update_user_role_by_id(user.id, trusted_role, db=db)
                 elif trusted_role:
@@ -701,9 +737,12 @@ async def signup_handler(
         raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
 
     # Atomically check if this is the only user *after* the insert.
-    # Only the single user present at this point should become admin.
+    # The bootstrap user becomes 'superadmin' (Phase 3.7 RBAC) — they need
+    # full platform-config access to set up the deployment. They can later
+    # demote themselves to 'admin' via Users page if they want a lesser tier
+    # for their own account and promote someone else to superadmin instead.
     if await Users.get_num_users(db=db) == 1:
-        await Users.update_user_role_by_id(user.id, 'admin', db=db)
+        await Users.update_user_role_by_id(user.id, 'superadmin', db=db)
         user = await Users.get_user_by_id(user.id, db=db)
         request.app.state.config.ENABLE_SIGNUP = False
 
@@ -1073,7 +1112,9 @@ async def update_admin_config(request: Request, form_data: AdminConfig, user=Dep
     request.app.state.config.ENABLE_MEMORIES = form_data.ENABLE_MEMORIES
     request.app.state.config.ENABLE_NOTES = form_data.ENABLE_NOTES
 
-    if form_data.DEFAULT_USER_ROLE in ['pending', 'user', 'admin']:
+    # Phase 3.7 RBAC: allow 'superadmin' as a default role too (though admins
+    # almost certainly shouldn't auto-promote new signups that high).
+    if form_data.DEFAULT_USER_ROLE in ['pending', 'user', 'admin', 'superadmin']:
         request.app.state.config.DEFAULT_USER_ROLE = form_data.DEFAULT_USER_ROLE
 
     request.app.state.config.DEFAULT_GROUP_ID = form_data.DEFAULT_GROUP_ID
@@ -1231,7 +1272,7 @@ async def generate_api_key(
     request: Request, user=Depends(get_current_user), db: AsyncSession = Depends(get_async_session)
 ):
     if not request.app.state.config.ENABLE_API_KEYS or (
-        user.role != 'admin'
+        user.role not in ('admin', 'superadmin')
         and not await has_permission(user.id, 'features.api_keys', request.app.state.config.USER_PERMISSIONS)
     ):
         raise HTTPException(
@@ -1379,3 +1420,42 @@ async def token_exchange(
         )
 
     return await create_session_response(request, user, db)
+
+
+############################
+# K4mi SSO Bridge (Phase 4)
+############################
+
+
+class K4miExchangeTokenResponse(BaseModel):
+    token: str
+    expires_at: int
+
+
+@router.post('/k4mi/exchange-token', response_model=K4miExchangeTokenResponse)
+async def k4mi_exchange_token(
+    request: Request,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Mint a short-lived (5 min) JWT for the K4mi SSO bridge.
+
+    The caller is already authenticated to Gnos3 via the standard session JWT
+    (get_verified_user). We mint a SEPARATE exchange-token JWT — same secret,
+    different claim shape — that K4mi's paperless.gnos_jwt_auth backend
+    accepts. The frontend then navigates to
+    `{K4MI_BASE_URL}/sso/login?token=<jwt>&next=<path>` to install a Django
+    session and reach the requested K4mi path.
+    """
+    user_groups = await Groups.get_groups_by_member_id(user.id, db=db)
+    group_names = [g.name for g in user_groups if g.name]
+
+    # mfa_verified stays False in Phase 4: K4mi's _provision_user only rejects
+    # the token when K4mi-local MFA is enabled for the user (rare for SSO
+    # users). Gnos3-side MFA passthrough is a Phase 5 concern.
+    token, expires_at = create_k4mi_exchange_token(
+        user,
+        groups=group_names,
+        mfa_verified=False,
+    )
+    return {'token': token, 'expires_at': expires_at}

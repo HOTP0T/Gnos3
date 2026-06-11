@@ -121,7 +121,7 @@ async def get_knowledge_bases(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not user.role in ('admin', 'superadmin') or not BYPASS_ADMIN_ACCESS_CONTROL:
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -146,7 +146,7 @@ async def get_knowledge_bases(
                 **knowledge_base.model_dump(),
                 write_access=(
                     user.id == knowledge_base.user_id
-                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or knowledge_base.id in writable_knowledge_base_ids
                 ),
             )
@@ -177,7 +177,7 @@ async def search_knowledge_bases(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not user.role in ('admin', 'superadmin') or not BYPASS_ADMIN_ACCESS_CONTROL:
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -202,7 +202,7 @@ async def search_knowledge_bases(
                 **knowledge_base.model_dump(),
                 write_access=(
                     user.id == knowledge_base.user_id
-                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or knowledge_base.id in writable_knowledge_base_ids
                 ),
             )
@@ -251,7 +251,7 @@ async def create_new_knowledge(
     # Database operations (has_permission, filter_allowed_access_grants, insert_new_knowledge) manage their own sessions.
     # This prevents holding a connection during embed_knowledge_base_metadata()
     # which makes external embedding API calls (1-5+ seconds).
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'workspace.knowledge', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(
@@ -296,7 +296,7 @@ async def reindex_knowledge_files(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin':
+    if user.role not in ('admin', 'superadmin'):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -389,7 +389,7 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Asyn
 
     if knowledge:
         if (
-            user.role == 'admin'
+            user.role in ('admin', 'superadmin')
             or knowledge.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -403,7 +403,7 @@ async def get_knowledge_by_id(id: str, user=Depends(get_verified_user), db: Asyn
                 **knowledge.model_dump(),
                 write_access=(
                     user.id == knowledge.user_id
-                    or (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    or (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or await AccessGrants.has_access(
                         user_id=user.id,
                         resource_type='knowledge',
@@ -456,7 +456,7 @@ async def update_knowledge_by_id(
             resource_id=knowledge.id,
             permission='write',
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -524,7 +524,7 @@ async def update_knowledge_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -571,7 +571,7 @@ async def get_knowledge_files_by_id(
         )
 
     if not (
-        user.role == 'admin'
+        user.role in ('admin', 'superadmin')
         or knowledge.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -637,7 +637,7 @@ async def add_file_to_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -710,7 +710,7 @@ async def update_file_from_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -789,7 +789,7 @@ async def remove_file_from_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -830,7 +830,7 @@ async def remove_file_from_knowledge_by_id(
     # file.  Collaborators with KB write access can unlink a file from the
     # knowledge base but must not be able to destroy files they do not own,
     # as the same file may be referenced by other KBs and chats.
-    if delete_file and (file.user_id == user.id or user.role == 'admin'):
+    if delete_file and (file.user_id == user.id or user.role in ('admin', 'superadmin')):
         try:
             # Remove the file's collection from vector database
             file_collection = f'file-{form_data.file_id}'
@@ -881,7 +881,7 @@ async def delete_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -947,7 +947,7 @@ async def reset_knowledge_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -996,7 +996,7 @@ async def add_files_to_knowledge_batch(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

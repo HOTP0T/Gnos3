@@ -49,7 +49,7 @@ PAGE_ITEM_COUNT = 30
 
 @router.get('/', response_model=list[PromptModel])
 async def get_prompts(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL:
         prompts = await Prompts.get_prompts(db=db)
     else:
         prompts = await Prompts.get_prompts_by_user_id(user.id, 'read', db=db)
@@ -59,7 +59,7 @@ async def get_prompts(user=Depends(get_verified_user), db: AsyncSession = Depend
 
 @router.get('/tags', response_model=list[str])
 async def get_prompt_tags(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL:
         return await Prompts.get_tags(db=db)
     else:
         prompts = await Prompts.get_prompts_by_user_id(user.id, 'read', db=db)
@@ -102,7 +102,7 @@ async def get_prompt_list(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL):
+    if not (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL):
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -126,7 +126,7 @@ async def get_prompt_list(
             PromptAccessResponse(
                 **prompt.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == prompt.user_id
                     or prompt.id in writable_prompt_ids
                 ),
@@ -149,7 +149,7 @@ async def create_new_prompt(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not (
+    if user.role not in ('admin', 'superadmin') and not (
         await has_permission(
             user.id,
             'workspace.prompts',
@@ -205,7 +205,7 @@ async def get_prompt_by_command(
 
     if prompt:
         if (
-            user.role == 'admin'
+            user.role in ('admin', 'superadmin')
             or prompt.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -218,7 +218,7 @@ async def get_prompt_by_command(
             return PromptAccessResponse(
                 **prompt.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == prompt.user_id
                     or await AccessGrants.has_access(
                         user_id=user.id,
@@ -249,7 +249,7 @@ async def get_prompt_by_id(
 
     if prompt:
         if (
-            user.role == 'admin'
+            user.role in ('admin', 'superadmin')
             or prompt.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -262,7 +262,7 @@ async def get_prompt_by_id(
             return PromptAccessResponse(
                 **prompt.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == prompt.user_id
                     or await AccessGrants.has_access(
                         user_id=user.id,
@@ -311,7 +311,7 @@ async def update_prompt_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -376,7 +376,7 @@ async def update_prompt_metadata(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -427,7 +427,7 @@ async def set_prompt_version(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -477,7 +477,7 @@ async def update_prompt_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -523,7 +523,7 @@ async def toggle_prompt_active(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -565,7 +565,7 @@ async def delete_prompt_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -601,7 +601,7 @@ async def get_prompt_history(
 
     # Check read access
     if not (
-        user.role == 'admin'
+        user.role in ('admin', 'superadmin')
         or prompt.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -638,7 +638,7 @@ async def get_prompt_history_entry(
 
     # Check read access
     if not (
-        user.role == 'admin'
+        user.role in ('admin', 'superadmin')
         or prompt.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -681,7 +681,7 @@ async def delete_prompt_history_entry(
 
     # Check write access
     if not (
-        user.role == 'admin'
+        user.role in ('admin', 'superadmin')
         or prompt.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -732,7 +732,7 @@ async def get_prompt_diff(
 
     # Check read access
     if not (
-        user.role == 'admin'
+        user.role in ('admin', 'superadmin')
         or prompt.user_id == user.id
         or await AccessGrants.has_access(
             user_id=user.id,

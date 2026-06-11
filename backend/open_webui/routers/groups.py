@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from open_webui.internal.db import get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.auth import get_admin_or_above_user, get_verified_user
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ async def get_groups(
     filter = {}
 
     # Admins can share to all groups regardless of share setting
-    if user.role != 'admin':
+    if user.role not in ('admin', 'superadmin'):
         filter['member_id'] = user.id
         if share is not None:
             filter['share'] = share
@@ -58,7 +58,7 @@ async def get_groups(
 @router.post('/create', response_model=Optional[GroupResponse])
 async def create_new_group(
     form_data: GroupForm,
-    user=Depends(get_admin_user),
+    user=Depends(get_admin_or_above_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     try:
@@ -87,7 +87,7 @@ async def create_new_group(
 
 
 @router.get('/id/{id}', response_model=Optional[GroupResponse])
-async def get_group_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def get_group_by_id(id: str, user=Depends(get_admin_or_above_user), db: AsyncSession = Depends(get_async_session)):
     group = await Groups.get_group_by_id(id, db=db)
     if group:
         return GroupResponse(
@@ -127,7 +127,7 @@ class GroupExportResponse(GroupResponse):
 
 
 @router.get('/id/{id}/export', response_model=Optional[GroupExportResponse])
-async def export_group_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def export_group_by_id(id: str, user=Depends(get_admin_or_above_user), db: AsyncSession = Depends(get_async_session)):
     group = await Groups.get_group_by_id(id, db=db)
     if group:
         return GroupExportResponse(
@@ -148,7 +148,7 @@ async def export_group_by_id(id: str, user=Depends(get_admin_user), db: AsyncSes
 
 
 @router.post('/id/{id}/users', response_model=list[UserInfoResponse])
-async def get_users_in_group(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def get_users_in_group(id: str, user=Depends(get_admin_or_above_user), db: AsyncSession = Depends(get_async_session)):
     try:
         users = await Users.get_users_by_group_id(id, db=db)
         return users
@@ -169,7 +169,7 @@ async def get_users_in_group(id: str, user=Depends(get_admin_user), db: AsyncSes
 async def update_group_by_id(
     id: str,
     form_data: GroupUpdateForm,
-    user=Depends(get_admin_user),
+    user=Depends(get_admin_or_above_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     try:
@@ -201,7 +201,7 @@ async def update_group_by_id(
 async def add_user_to_group(
     id: str,
     form_data: UserIdsForm,
-    user=Depends(get_admin_user),
+    user=Depends(get_admin_or_above_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     try:
@@ -231,7 +231,7 @@ async def add_user_to_group(
 async def remove_users_from_group(
     id: str,
     form_data: UserIdsForm,
-    user=Depends(get_admin_user),
+    user=Depends(get_admin_or_above_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     try:
@@ -260,7 +260,7 @@ async def remove_users_from_group(
 
 
 @router.delete('/id/{id}/delete', response_model=bool)
-async def delete_group_by_id(id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def delete_group_by_id(id: str, user=Depends(get_admin_or_above_user), db: AsyncSession = Depends(get_async_session)):
     try:
         result = await Groups.delete_group_by_id(id, db=db)
         if result:

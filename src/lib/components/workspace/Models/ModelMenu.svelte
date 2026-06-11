@@ -14,7 +14,7 @@
 	import Pin from '$lib/components/icons/Pin.svelte';
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 
-	import { config, user as currentUser, settings } from '$lib/stores';
+	import { config, user as currentUser, settings, isAdmin } from '$lib/stores';
 	import Link from '$lib/components/icons/Link.svelte';
 
 	const i18n = getContext('i18n');
@@ -176,7 +176,7 @@
 				<div class="flex items-center">{$i18n.t('Copy Link')}</div>
 			</button>
 
-			{#if writeAccess && ($currentUser?.role === 'admin' || $currentUser?.permissions?.workspace?.models_export)}
+			{#if writeAccess && ($isAdmin || $currentUser?.permissions?.workspace?.models_export)}
 				<button
 					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { config, models, settings, user } from '$lib/stores';
+	import { config, models, settings, user, isAdmin} from '$lib/stores';
 	import { createEventDispatcher, onMount, onDestroy, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -546,7 +546,7 @@
 				</div>
 			</div>
 
-			{#if $user?.role === 'admin'}
+			{#if $isAdmin}
 				<div>
 					<div class=" py-0.5 flex w-full justify-between">
 						<div id="toast-notifications-label" class=" self-center text-xs">
@@ -736,7 +736,7 @@
 				</div>
 			</div>
 
-			{#if $user.role === 'admin' || $user?.permissions?.chat?.temporary}
+			{#if $isAdmin || $user?.permissions?.chat?.temporary}
 				<div>
 					<div class=" py-0.5 flex w-full justify-between">
 						<div id="temp-chat-default-label" class=" self-center text-xs">

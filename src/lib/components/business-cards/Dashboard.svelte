@@ -10,8 +10,8 @@
 		type BusinessCard,
 		type BusinessCardStats
 	} from '$lib/apis/business-cards';
-	import { K4MI_BASE_URL } from '$lib/constants';
 
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
@@ -62,8 +62,6 @@
 		if (refreshInterval) clearInterval(refreshInterval);
 	});
 
-	const k4miHref = (id: number | null) =>
-		id ? `${K4MI_BASE_URL}/documents/${id}/details` : '#';
 </script>
 
 <div class="py-3">
@@ -168,12 +166,7 @@
 								</div>
 								{#if card.k4mi_document_id}
 									<Tooltip content={$i18n.t('Open in K4mi')}>
-										<a
-											class="text-xs text-gray-500 dark:text-gray-400 hover:underline"
-											href={k4miHref(card.k4mi_document_id)}
-											target="_blank"
-											rel="noopener noreferrer"
-										>K4mi</a>
+										<K4miDocLink docId={card.k4mi_document_id} extraClass="text-xs text-gray-500 dark:text-gray-400 hover:underline">K4mi</K4miDocLink>
 									</Tooltip>
 								{/if}
 							</li>
@@ -204,12 +197,7 @@
 									: ''}
 							</span>
 							{#if card.k4mi_document_id}
-								<a
-									class="text-xs text-amber-700 dark:text-amber-300 hover:underline"
-									href={k4miHref(card.k4mi_document_id)}
-									target="_blank"
-									rel="noopener noreferrer"
-								>K4mi</a>
+								<K4miDocLink docId={card.k4mi_document_id} extraClass="text-xs text-amber-700 dark:text-amber-300 hover:underline">K4mi</K4miDocLink>
 							{/if}
 						</li>
 					{/each}

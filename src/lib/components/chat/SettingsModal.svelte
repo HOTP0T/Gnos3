@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getContext, onMount, tick } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { config, models, settings, user } from '$lib/stores';
+	import { config, models, settings, user, isAdmin} from '$lib/stores';
 	import { updateUserSettings } from '$lib/apis/users';
 	import { getModels as _getModels } from '$lib/apis';
 	import { goto } from '$app/navigation';
@@ -441,19 +441,19 @@
 
 			if (tab.id === 'tools') {
 				return (
-					$user?.role === 'admin' ||
+					$isAdmin ||
 					($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)
 				);
 			}
 
 			if (tab.id === 'interface') {
-				return $user?.role === 'admin' || ($user?.permissions?.settings?.interface ?? true);
+				return $isAdmin || ($user?.permissions?.settings?.interface ?? true);
 			}
 
 			if (tab.id === 'personalization') {
 				return (
 					$config?.features?.enable_memories &&
-					($user?.role === 'admin' || ($user?.permissions?.features?.memories ?? true))
+					($isAdmin || ($user?.permissions?.features?.memories ?? true))
 				);
 			}
 
@@ -631,7 +631,7 @@
 								<div class=" self-center">{$i18n.t('Interface')}</div>
 							</button>
 						{:else if tabId === 'connections'}
-							{#if $user?.role === 'admin' || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
+							{#if $isAdmin || ($user?.role === 'user' && $config?.features?.enable_direct_connections)}
 								<button
 									role="tab"
 									aria-controls="tab-connections"
@@ -657,7 +657,7 @@
 								</button>
 							{/if}
 						{:else if tabId === 'tools'}
-							{#if $user?.role === 'admin' || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)}
+							{#if $isAdmin || ($user?.role === 'user' && $user?.permissions?.features?.direct_tool_servers)}
 								<button
 									role="tab"
 									aria-controls="tab-tools"
@@ -785,7 +785,7 @@
 						{$i18n.t('No results found')}
 					</div>
 				{/if}
-				{#if $user?.role === 'admin'}
+				{#if $isAdmin}
 					<a
 						href="/admin/settings"
 						draggable="false"

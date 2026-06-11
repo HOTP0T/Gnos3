@@ -1,5 +1,5 @@
 import { APP_NAME } from '$lib/constants';
-import { type Writable, writable } from 'svelte/store';
+import { type Writable, type Readable, derived, writable } from 'svelte/store';
 import type { ModelConfig } from '$lib/apis';
 import type { Banner } from '$lib/types';
 import type { Socket } from 'socket.io-client';
@@ -17,6 +17,16 @@ export const WEBUI_DEPLOYMENT_ID = writable(null);
 
 export const config: Writable<Config | undefined> = writable(undefined);
 export const user: Writable<SessionUser | undefined> = writable(undefined);
+
+// RBAC tier helpers (Phase 3.7). `isAdmin` is true for BOTH the data-admin tier
+// and the superadmin (platform-admin) tier — use it for power-user UI affordances
+// that both tiers should see. `isSuperadmin` is true only for the platform-admin
+// tier — use it for system-settings UI (LDAP/OAuth/RAG/model providers/functions).
+export const isAdmin: Readable<boolean> = derived(
+	user,
+	($u) => $u?.role === 'admin' || $u?.role === 'superadmin'
+);
+export const isSuperadmin: Readable<boolean> = derived(user, ($u) => $u?.role === 'superadmin');
 
 // Electron App
 export const isApp = writable(false);

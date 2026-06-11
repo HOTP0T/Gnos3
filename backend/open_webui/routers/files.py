@@ -338,7 +338,7 @@ async def list_files(
     db: AsyncSession = Depends(get_async_session),
 ):
     skip = (page - 1) * PAGE_SIZE
-    user_id = None if (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
+    user_id = None if (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
 
     result = await Files.get_file_list(user_id=user_id, skip=skip, limit=PAGE_SIZE, db=db)
 
@@ -372,7 +372,7 @@ async def search_files(
     Uses SQL-based filtering with pagination for better performance.
     """
     # Determine user_id: null for admin with bypass (search all), user.id otherwise
-    user_id = None if (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
+    user_id = None if (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL) else user.id
 
     # Use optimized database query with pagination
     files = await Files.search_files(
@@ -439,7 +439,7 @@ async def get_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncSess
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or user.role in ('admin', 'superadmin') or await has_access_to_file(id, 'read', user, db=db):
         return file
     else:
         raise HTTPException(
@@ -463,7 +463,7 @@ async def get_file_process_status(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or user.role in ('admin', 'superadmin') or await has_access_to_file(id, 'read', user, db=db):
         if stream:
             MAX_FILE_PROCESSING_DURATION = 3600 * 2
 
@@ -524,7 +524,7 @@ async def get_file_data_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or user.role in ('admin', 'superadmin') or await has_access_to_file(id, 'read', user, db=db):
         return {'content': file.data.get('content', '')}
     else:
         raise HTTPException(
@@ -558,7 +558,7 @@ async def update_file_data_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
+    if file.user_id == user.id or user.role in ('admin', 'superadmin') or await has_access_to_file(id, 'write', user, db=db):
         try:
             await process_file(
                 request,
@@ -617,7 +617,7 @@ async def get_file_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or user.role in ('admin', 'superadmin') or await has_access_to_file(id, 'read', user, db=db):
         # Virtual files (from data connectors) have no on-disk path — serve stored data
         if not file.path and file.data:
             from starlette.responses import Response
@@ -711,13 +711,13 @@ async def get_html_file_content_by_id(
         )
 
     file_user = await Users.get_user_by_id(file.user_id, db=db)
-    if not file_user or file_user.role != 'admin':
+    if not file_user or file_user.role not in ('admin', 'superadmin'):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or user.role in ('admin', 'superadmin') or await has_access_to_file(id, 'read', user, db=db):
         try:
             file_path = await asyncio.to_thread(Storage.get_file, file.path)
             file_path = Path(file_path)
@@ -759,7 +759,7 @@ async def get_file_content_by_id(
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'read', user, db=db):
+    if file.user_id == user.id or user.role in ('admin', 'superadmin') or await has_access_to_file(id, 'read', user, db=db):
         file_path = file.path
 
         # Handle Unicode filenames
@@ -815,7 +815,7 @@ async def delete_file_by_id(id: str, user=Depends(get_verified_user), db: AsyncS
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if file.user_id == user.id or user.role == 'admin' or await has_access_to_file(id, 'write', user, db=db):
+    if file.user_id == user.id or user.role in ('admin', 'superadmin') or await has_access_to_file(id, 'write', user, db=db):
         # Clean up KB associations and embeddings before deleting
         knowledges = await Knowledges.get_knowledges_by_file_id(id, db=db)
         for knowledge in knowledges:

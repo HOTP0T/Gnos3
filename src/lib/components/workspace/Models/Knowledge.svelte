@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
-	import { config, knowledge, settings, user } from '$lib/stores';
+	import { config, knowledge, settings, user, isAdmin} from '$lib/stores';
 
 	import KnowledgeSelector from './Knowledge/KnowledgeSelector.svelte';
 	import FileItem from '$lib/components/common/FileItem.svelte';
@@ -25,7 +25,7 @@
 	}
 
 	const uploadFileHandler = async (file, fullContext: boolean = false) => {
-		if ($user?.role !== 'admin' && !($user?.permissions?.chat?.file_upload ?? true)) {
+		if (!$isAdmin && !($user?.permissions?.chat?.file_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload files.'));
 			return null;
 		}
@@ -212,7 +212,7 @@
 					</div>
 				</KnowledgeSelector>
 
-				{#if $user?.role === 'admin' || $user?.permissions?.chat?.file_upload}
+				{#if $isAdmin || $user?.permissions?.chat?.file_upload}
 					<button
 						class=" px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-100 dark:outline-gray-850 rounded-3xl"
 						type="button"

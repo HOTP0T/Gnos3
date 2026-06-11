@@ -241,11 +241,13 @@
 								<div class="px-2 py-1 flex items-center gap-1 translate-y-0.5">
 									<div class=" ">
 										<Badge
-											type={user.role === 'admin'
-												? 'info'
-												: user.role === 'user'
-													? 'success'
-													: 'muted'}
+											type={user.role === 'superadmin'
+												? 'warning'
+												: user.role === 'admin'
+													? 'info'
+													: user.role === 'user'
+														? 'success'
+														: 'muted'}
 											content={$i18n.t(user.role)}
 										/>
 									</div>

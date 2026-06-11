@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
-	import { config, user } from '$lib/stores';
+	import { config, user, isAdmin} from '$lib/stores';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
 	import GarbageBin from '$lib/components/icons/GarbageBin.svelte';
@@ -58,7 +58,7 @@
 				<div class="flex items-center">{$i18n.t('Clone')}</div>
 			</button>
 
-			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.prompts_export}
+			{#if $isAdmin || $user?.permissions?.workspace?.prompts_export}
 				<button
 					class="select-none flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
 					on:click={() => {

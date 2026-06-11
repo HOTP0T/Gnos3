@@ -4,7 +4,7 @@
 	import dayjs from 'dayjs';
 
 	import { getInvoiceList } from '$lib/apis/accounting';
-	import { K4MI_BASE_URL } from '$lib/constants';
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -247,13 +247,11 @@
 									<td class="py-2 pr-2 font-mono dark:text-gray-300 whitespace-nowrap">
 										{invoice.invoice_number ?? `#${invoice.id}`}
 										{#if invoice.k4mi_document_id}
-											<a
-												href="{K4MI_BASE_URL}/documents/{invoice.k4mi_document_id}/details"
-												target="_blank"
-												rel="noopener"
-												class="ml-1 text-blue-500 hover:text-blue-700 inline-block align-middle"
+											<K4miDocLink
+												docId={invoice.k4mi_document_id}
 												title={$i18n.t('Open in K4mi')}
-												on:click|stopPropagation
+												extraClass="ml-1 text-blue-500 hover:text-blue-700 inline-block align-middle"
+												stopPropagation
 											>
 												<svg
 													xmlns="http://www.w3.org/2000/svg"
@@ -268,7 +266,7 @@
 														d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"
 													/></svg
 												>
-											</a>
+											</K4miDocLink>
 										{/if}
 									</td>
 									<td
@@ -543,12 +541,11 @@
 					<!-- K4mi document link -->
 					{#if previewInvoice.k4mi_document_id}
 						<div class="border-t border-gray-100 dark:border-gray-800 my-1.5"></div>
-						<a
-							href="{K4MI_BASE_URL}/documents/{previewInvoice.k4mi_document_id}/details"
-							target="_blank"
-							rel="noopener"
-							class="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition mt-1"
-							on:click|stopPropagation
+						<K4miDocLink
+							docId={previewInvoice.k4mi_document_id}
+							title={$i18n.t('View full document in K4mi')}
+							extraClass="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition mt-1"
+							stopPropagation
 						>
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
@@ -565,7 +562,7 @@
 								/>
 							</svg>
 							{$i18n.t('View full document in K4mi')}
-						</a>
+						</K4miDocLink>
 					{/if}
 				</div>
 			</div>

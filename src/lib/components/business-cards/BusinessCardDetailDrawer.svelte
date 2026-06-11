@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createEventDispatcher, getContext } from 'svelte';
+	import { createEventDispatcher, getContext, onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { fly, fade } from 'svelte/transition';
 
@@ -10,8 +10,9 @@
 		getBusinessCardPreviewUrl,
 		type BusinessCard
 	} from '$lib/apis/business-cards';
-	import { K4MI_BASE_URL } from '$lib/constants';
+	import { fetchAsBlobUrl, revokeBlobUrl } from '$lib/utils/blobPreview';
 
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -30,9 +31,6 @@
 	let reprocessing = false;
 
 	$: dirty = Object.keys(draft).length > 0;
-	$: k4miHref = card.k4mi_document_id
-		? `${K4MI_BASE_URL}/documents/${card.k4mi_document_id}/details`
-		: '';
 
 	type Field = {
 		key: keyof BusinessCard;
@@ -156,11 +154,43 @@
 	$: confidencePct =
 		card.confidence_score != null ? Math.round(Number(card.confidence_score) * 100) : null;
 
-	$: previewUrl = card.k4mi_document_id ? getBusinessCardPreviewUrl(card.id) : null;
+	// Iframes / <img> tags can't send `Authorization: Bearer …`, and Phase 1
+	// RBAC added a router-level auth dep on `/api/business-cards/*`. Fetch the
+	// preview ourselves with the right header and use a blob URL.
+	let previewUrl: string | null = null;
 	let previewMode: 'image' | 'iframe' = 'image';
 	let previewError = false;
 	let previewExpanded = false;
-	$: card, ((previewMode = 'image'), (previewError = false), (previewExpanded = false));
+	let lastFetchedFor: number | null = null;
+
+	const loadPreview = async (cardId: number | null, hasDoc: boolean) => {
+		if (cardId === lastFetchedFor) return;
+		if (previewUrl) {
+			revokeBlobUrl(previewUrl);
+			previewUrl = null;
+		}
+		previewMode = 'image';
+		previewError = false;
+		previewExpanded = false;
+		lastFetchedFor = cardId;
+		if (!cardId || !hasDoc) return;
+		const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+		const result = await fetchAsBlobUrl(getBusinessCardPreviewUrl(cardId), token);
+		if (result && lastFetchedFor === cardId) {
+			previewUrl = result.url;
+			// Pre-select the right mode from content-type so we skip the
+			// <img> → onerror → <iframe> dance for PDFs.
+			if (!result.contentType.startsWith('image/')) {
+				previewMode = 'iframe';
+			}
+		} else if (lastFetchedFor === cardId) {
+			previewError = true;
+		}
+	};
+
+	$: loadPreview(card?.id ?? null, !!card?.k4mi_document_id);
+
+	onDestroy(() => revokeBlobUrl(previewUrl));
 
 	const handleClose = () => {
 		if (dirty && !confirm($i18n.t('Discard unsaved changes?'))) return;
@@ -269,12 +299,10 @@
 			</div>
 
 			<div class="flex flex-wrap items-center gap-2 mt-3">
-				{#if k4miHref}
-					<a
-						class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
-						href={k4miHref}
-						target="_blank"
-						rel="noopener noreferrer"
+				{#if card.k4mi_document_id}
+					<K4miDocLink
+						docId={card.k4mi_document_id}
+						extraClass="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
 					>
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -290,7 +318,7 @@
 							/><line x1="10" y1="14" x2="21" y2="3" /></svg
 						>
 						{$i18n.t('Open in K4mi')}
-					</a>
+					</K4miDocLink>
 				{/if}
 				{#if card.k4mi_document_id}
 					<button
@@ -417,14 +445,12 @@
 									{$i18n.t('Expand')}
 								{/if}
 							</button>
-							<a
-								class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
-								href={previewUrl}
-								target="_blank"
-								rel="noopener noreferrer"
+							<K4miDocLink
+								docId={card.k4mi_document_id}
+								extraClass="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition"
 							>
 								{$i18n.t('Open in new tab')}
-							</a>
+							</K4miDocLink>
 						</div>
 					</div>
 
@@ -439,15 +465,13 @@
 								<p class="text-xs mt-1">
 									{$i18n.t('Check that bc-api can reach K4mi and that the document still exists.')}
 								</p>
-								{#if k4miHref}
-									<a
-										class="inline-block mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
-										href={k4miHref}
-										target="_blank"
-										rel="noopener noreferrer"
+								{#if card.k4mi_document_id}
+									<K4miDocLink
+										docId={card.k4mi_document_id}
+										extraClass="inline-block mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
 									>
 										{$i18n.t('Open in K4mi instead →')}
-									</a>
+									</K4miDocLink>
 								{/if}
 							</div>
 						{:else if previewMode === 'image'}

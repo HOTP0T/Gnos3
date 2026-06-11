@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { onMount, getContext, tick } from 'svelte';
-	import { models, tools, functions, user } from '$lib/stores';
+	import { models, tools, functions, user, isAdmin} from '$lib/stores';
 	import { WEBUI_BASE_URL, DEFAULT_CAPABILITIES } from '$lib/constants';
 
 	import { getTools } from '$lib/apis/tools';
@@ -357,9 +357,9 @@
 		bind:show={showAccessControlModal}
 		bind:accessGrants
 		accessRoles={preset ? ['read', 'write'] : ['read']}
-		share={$user?.permissions?.sharing?.models || $user?.role === 'admin'}
-		sharePublic={$user?.permissions?.sharing?.public_models || $user?.role === 'admin'}
-		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $user?.role === 'admin'}
+		share={$user?.permissions?.sharing?.models || $isAdmin}
+		sharePublic={$user?.permissions?.sharing?.public_models || $isAdmin}
+		shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) || $isAdmin}
 		onChange={async () => {
 			if (edit && model?.id) {
 				try {

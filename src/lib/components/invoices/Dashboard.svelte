@@ -5,9 +5,9 @@
 	import dayjs from 'dayjs';
 
 	import { getInvoices, getVendors, getSpendingSummary, getNeedsReview, getProcessingInvoices, getInvoiceStats } from '$lib/apis/invoices';
-	import { K4MI_BASE_URL } from '$lib/constants';
 	import { theme } from '$lib/stores';
 
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -420,15 +420,13 @@
 								<td class="px-3 py-1.5">
 									<!-- svelte-ignore a11y-click-events-have-key-events -->
 									<!-- svelte-ignore a11y-no-static-element-interactions -->
-									<a
-										href="{K4MI_BASE_URL}/documents/{invoice.k4mi_document_id}/details"
-										target="_blank"
-										rel="noopener noreferrer"
-										class="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
-										on:click|stopPropagation
+									<K4miDocLink
+										docId={invoice.k4mi_document_id}
+										extraClass="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline"
+										stopPropagation
 									>
 										#{invoice.k4mi_document_id}
-									</a>
+									</K4miDocLink>
 								</td>
 							</tr>
 						{/each}

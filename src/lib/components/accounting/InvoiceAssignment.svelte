@@ -19,9 +19,10 @@
 		getEmployees,
 		getExpenseCategories
 	} from '$lib/apis/accounting';
-	import { INVOICE_API_BASE_URL, K4MI_BASE_URL } from '$lib/constants';
+	import { updateInvoice } from '$lib/apis/invoices';
 	import { convertAmount } from '$lib/utils/currency';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import DocumentPreviewModal from '$lib/components/invoices/DocumentPreviewModal.svelte';
 	import InvoiceCreateModal from '$lib/components/accounting/InvoiceCreateModal.svelte';
 
@@ -135,16 +136,9 @@
 		return accountMap[code] ? `${code} ${accountMap[code]}` : code;
 	};
 
-	// Inline edit: patch invoice fields
-	const patchInvoice = async (invoiceId: number, fields: Record<string, any>) => {
-		const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/${invoiceId}`, {
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(fields)
-		});
-		if (!res.ok) throw await res.json();
-		return res.json();
-	};
+	// Inline edit: patch invoice fields via the auth-wired API client.
+	const patchInvoice = async (invoiceId: number, fields: Record<string, any>) =>
+		updateInvoice(localStorage.token, invoiceId, fields);
 
 	const saveField = async (invoiceId: number, field: string, value: string) => {
 		try {
@@ -624,7 +618,7 @@
 							{#each filteredCompany as inv (inv.id)}
 								<tr class="text-xs hover:bg-gray-50 dark:hover:bg-gray-850/50 transition border-b border-gray-50/50 dark:border-gray-850/30 cursor-pointer" on:click={() => { expandedId = expandedId === inv.id ? null : inv.id; }}>
 									<td class="px-2 py-1.5" on:click|stopPropagation><input type="checkbox" checked={selectedCompanyIds.has(inv.id)} on:change={() => toggleCompanySelect(inv.id)} class="rounded" /></td>
-									<td class="px-2 py-1.5 font-mono">{#if inv.k4mi_document_id}<a href="{K4MI_BASE_URL}/documents/{inv.k4mi_document_id}/details" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline" title={$i18n.t('Open in K4mi')} on:click|stopPropagation>{inv.invoice_number ?? '-'}</a>{:else}{inv.invoice_number ?? '-'}{/if}</td>
+									<td class="px-2 py-1.5 font-mono">{#if inv.k4mi_document_id}<K4miDocLink docId={inv.k4mi_document_id} title={$i18n.t('Open in K4mi')} stopPropagation>{inv.invoice_number ?? '-'}</K4miDocLink>{:else}{inv.invoice_number ?? '-'}{/if}</td>
 									<td class="px-2 py-1.5 max-w-[130px] truncate">{inv.vendor_name ?? '-'}</td>
 									<td class="px-2 py-1.5 max-w-[130px] truncate">{inv.client_name ?? '-'}</td>
 									<td class="px-2 py-1.5">{inv.invoice_date ?? '-'}</td>
@@ -954,7 +948,7 @@
 								{#each unassignedInvoices as inv (inv.id)}
 									<tr class="text-xs hover:bg-gray-50 dark:hover:bg-gray-850/50 transition border-b border-gray-50/50 dark:border-gray-850/30">
 										<td class="px-2 py-1.5"><input type="checkbox" checked={selectedUnassignedIds.has(inv.id)} on:change={() => toggleUnassignedSelect(inv.id)} class="rounded" /></td>
-										<td class="px-2 py-1.5 font-mono">{#if inv.k4mi_document_id}<a href="{K4MI_BASE_URL}/documents/{inv.k4mi_document_id}/details" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline" title={$i18n.t('Open in K4mi')} on:click|stopPropagation>{inv.invoice_number ?? '-'}</a>{:else}{inv.invoice_number ?? '-'}{/if}</td>
+										<td class="px-2 py-1.5 font-mono">{#if inv.k4mi_document_id}<K4miDocLink docId={inv.k4mi_document_id} title={$i18n.t('Open in K4mi')} stopPropagation>{inv.invoice_number ?? '-'}</K4miDocLink>{:else}{inv.invoice_number ?? '-'}{/if}</td>
 										<td class="px-2 py-1.5 max-w-[130px] truncate">{inv.vendor_name ?? '-'}</td>
 										<td class="px-2 py-1.5 max-w-[130px] truncate">{inv.client_name ?? '-'}</td>
 										<td class="px-2 py-1.5">{inv.invoice_date ?? '-'}</td>

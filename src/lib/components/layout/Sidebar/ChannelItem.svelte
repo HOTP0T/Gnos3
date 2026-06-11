@@ -4,7 +4,7 @@
 	const i18n = getContext('i18n');
 
 	import { page } from '$app/stores';
-	import { channels, mobile, showSidebar, user } from '$lib/stores';
+	import { channels, mobile, showSidebar, user, isAdmin} from '$lib/stores';
 	import { getUserActiveStatusById } from '$lib/apis/users';
 	import { updateChannelById, updateChannelMemberActiveStatusById } from '$lib/apis/channels';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
@@ -229,7 +229,7 @@
 				<XMark className="size-3.5" />
 			</button>
 		</div>
-	{:else if $user?.role === 'admin' || channel.user_id === $user?.id}
+	{:else if $isAdmin || channel.user_id === $user?.id}
 		<div
 			class="ml-0.5 mr-1 invisible group-hover:visible self-center flex items-center dark:text-gray-300"
 		>

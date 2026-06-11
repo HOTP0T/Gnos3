@@ -15,8 +15,8 @@
 		knowledge as _knowledge,
 		config,
 		user,
-		settings
-	} from '$lib/stores';
+		settings,
+		isAdmin} from '$lib/stores';
 
 	import {
 		updateFileDataContentById,
@@ -835,10 +835,10 @@
 		<AccessControlModal
 			bind:show={showAccessControlModal}
 			bind:accessGrants={knowledge.access_grants}
-			share={$user?.permissions?.sharing?.knowledge || $user?.role === 'admin'}
-			sharePublic={$user?.permissions?.sharing?.public_knowledge || $user?.role === 'admin'}
+			share={$user?.permissions?.sharing?.knowledge || $isAdmin}
+			sharePublic={$user?.permissions?.sharing?.public_knowledge || $isAdmin}
 			shareUsers={($user?.permissions?.access_grants?.allow_users ?? true) ||
-				$user?.role === 'admin'}
+				$isAdmin}
 			onChange={async () => {
 				try {
 					await updateKnowledgeAccessGrants(localStorage.token, id, knowledge.access_grants ?? []);

@@ -416,7 +416,7 @@ async def check_model_access(user, model, db=None):
 async def get_filtered_models(models, user, db=None):
     # Filter out models that the user does not have access to
     if (
-        user.role == 'user' or (user.role == 'admin' and not BYPASS_ADMIN_ACCESS_CONTROL)
+        user.role == 'user' or (user.role in ('admin', 'superadmin') and not BYPASS_ADMIN_ACCESS_CONTROL)
     ) and not BYPASS_MODEL_ACCESS_CONTROL:
         model_infos = {}
         for model in models:
@@ -455,12 +455,12 @@ async def get_filtered_models(models, user, db=None):
             model_info = model_infos.get(model['id'])
             if model_info:
                 if (
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == model_info.get('user_id')
                     or model['id'] in accessible_model_ids
                 ):
                     filtered_models.append(model)
-            elif user.role == 'admin':
+            elif user.role in ('admin', 'superadmin'):
                 # No DB entry means no access control configured yet;
                 # only admins can see unconfigured models.
                 filtered_models.append(model)

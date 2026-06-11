@@ -3,7 +3,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import { goto } from '$app/navigation';
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 	import { page } from '$app/stores';
 
 	import UserList from './Users/UserList.svelte';
@@ -33,7 +33,7 @@
 	let loaded = false;
 
 	onMount(async () => {
-		if ($user?.role !== 'admin') {
+		if (!$isAdmin) {
 			await goto('/');
 		}
 

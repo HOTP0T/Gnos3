@@ -2,7 +2,7 @@
 	import { getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { settings, showSettings, terminalServers, selectedTerminalId, user } from '$lib/stores';
+	import { settings, showSettings, terminalServers, selectedTerminalId, user, isAdmin} from '$lib/stores';
 	import { getToolServersData } from '$lib/apis';
 
 	import Dropdown from '$lib/components/common/Dropdown.svelte';
@@ -112,7 +112,7 @@
 				class="min-w-56 max-w-56 rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg max-h-72 overflow-y-auto overflow-x-hidden scrollbar-thin"
 			>
 				<!-- Direct terminals (gated by permission) -->
-				{#if directTerminals.length > 0 && ($user?.role === 'admin' || ($user?.permissions?.features?.direct_tool_servers ?? true))}
+				{#if directTerminals.length > 0 && ($isAdmin || ($user?.permissions?.features?.direct_tool_servers ?? true))}
 					<div class="flex items-center justify-between px-3 py-1">
 						<span
 							class="text-[10px] font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider"
@@ -189,7 +189,7 @@
 						>
 							{$i18n.t('System')}
 						</span>
-						{#if $user?.role === 'admin'}
+						{#if $isAdmin}
 							<Tooltip content={$i18n.t('Add Terminal')} placement="top">
 								<button
 									type="button"

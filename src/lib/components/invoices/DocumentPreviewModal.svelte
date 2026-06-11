@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { getContext, onDestroy } from 'svelte';
 	import dayjs from 'dayjs';
 	import { toast } from 'svelte-sonner';
 
 	import Modal from '$lib/components/common/Modal.svelte';
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import { updateInvoice } from '$lib/apis/invoices';
-	import { INVOICE_API_BASE_URL, K4MI_BASE_URL } from '$lib/constants';
+	import { INVOICE_API_BASE_URL } from '$lib/constants';
+	import { fetchAsBlobUrl, revokeBlobUrl } from '$lib/utils/blobPreview';
 
 	const i18n = getContext('i18n');
 
@@ -15,7 +17,39 @@
 
 	const INVOICE_API_BASE = INVOICE_API_BASE_URL;
 
-	$: previewUrl = invoice ? `${INVOICE_API_BASE}/api/invoices/${invoice.id}/preview` : '';
+	// Iframes can't send `Authorization: Bearer …`, and Phase 1 RBAC added a
+	// router-level auth dep on `/api/invoices/*`. So fetch the PDF ourselves
+	// (where we control headers) and use a blob URL for the iframe src.
+	let previewUrl = '';
+	let lastFetchedFor: number | null = null;
+
+	const loadPreview = async (id: number | null) => {
+		if (id === lastFetchedFor) return;
+		if (previewUrl) {
+			revokeBlobUrl(previewUrl);
+			previewUrl = '';
+		}
+		lastFetchedFor = id;
+		if (!id) return;
+		const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+		const result = await fetchAsBlobUrl(
+			`${INVOICE_API_BASE}/api/invoices/${id}/preview`,
+			token
+		);
+		if (result && lastFetchedFor === id) {
+			previewUrl = result.url;
+		}
+	};
+
+	// Only fetch when the modal is open AND has an invoice — avoids loading
+	// every previously-rendered invoice in the table.
+	$: if (show && invoice?.id) {
+		loadPreview(invoice.id);
+	} else if (!show) {
+		loadPreview(null);
+	}
+
+	onDestroy(() => revokeBlobUrl(previewUrl));
 
 	// Editable field definitions
 	const EDITABLE_FIELDS = [
@@ -133,14 +167,12 @@
 			</div>
 			<div class="flex items-center gap-2">
 				{#if invoice?.k4mi_document_id}
-					<a
-						href="{K4MI_BASE_URL}/documents/{invoice.k4mi_document_id}/details"
-						target="_blank"
-						rel="noopener noreferrer"
-						class="text-xs px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-lg font-medium dark:text-gray-200"
+					<K4miDocLink
+						docId={invoice.k4mi_document_id}
+						extraClass="text-xs px-3 py-1.5 bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 transition rounded-lg font-medium dark:text-gray-200"
 					>
 						{$i18n.t('Open in K4mi')}
-					</a>
+					</K4miDocLink>
 				{/if}
 				<button
 					class="self-center p-1 hover:bg-gray-100 dark:hover:bg-gray-850 rounded-lg transition"

@@ -14,8 +14,8 @@
 		showShortcuts,
 		user,
 		config,
-		settings
-	} from '$lib/stores';
+		settings,
+		isAdmin} from '$lib/stores';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -94,7 +94,7 @@
 		dispatch('change', state);
 
 		// Fetch usage info when dropdown opens, if user has permission
-		if (state && ($config?.features?.enable_public_active_users_count || role === 'admin')) {
+		if (state && ($config?.features?.enable_public_active_users_count || (role === 'admin' || role === 'superadmin'))) {
 			getUsageInfo();
 		}
 	};
@@ -254,7 +254,7 @@
 				<div class=" self-center truncate">{$i18n.t('Settings')}</div>
 			</button>
 
-			{#if role === 'admin'}
+			{#if (role === 'admin' || role === 'superadmin')}
 				<a
 					href="/admin"
 					draggable="false"
@@ -302,7 +302,7 @@
 
 			<hr class=" border-gray-50/30 dark:border-gray-800/30 my-1 p-0" />
 
-			{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
+			{#if $isAdmin || $user?.permissions?.workspace?.models || $user?.permissions?.workspace?.knowledge || $user?.permissions?.workspace?.prompts || $user?.permissions?.workspace?.tools}
 				<div class="flex items-center w-full">
 					<a
 						href="/workspace"
@@ -359,7 +359,7 @@
 				</div>
 			{/if}
 
-			{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}
+			{#if ($config?.features?.enable_notes ?? false) && ($isAdmin || ($user?.permissions?.features?.notes ?? true))}
 				<div class="flex items-center w-full">
 					<a
 						href="/notes"
@@ -403,7 +403,7 @@
 				</div>
 			{/if}
 
-			{#if $config?.features?.enable_calendar && ($user?.role === 'admin' || $user?.permissions?.features?.calendar)}
+			{#if $config?.features?.enable_calendar && ($isAdmin || $user?.permissions?.features?.calendar)}
 				<div class="flex items-center w-full">
 					<a
 						href="/calendar"
@@ -456,7 +456,7 @@
 				</div>
 			{/if}
 
-			{#if $config?.features?.enable_automations && ($user?.role === 'admin' || $user?.permissions?.features?.automations)}
+			{#if $config?.features?.enable_automations && ($isAdmin || $user?.permissions?.features?.automations)}
 				<div class="flex items-center w-full">
 					<a
 						href="/automations"
@@ -513,7 +513,7 @@
 				</div>
 			{/if}
 
-			{#if role === 'admin'}
+			{#if (role === 'admin' || role === 'superadmin')}
 				<div class="flex items-center w-full">
 					<a
 						href="/playground"
@@ -562,7 +562,7 @@
 
 				<!-- {$i18n.t('Help')} -->
 
-				{#if $user?.role === 'admin'}
+				{#if $isAdmin}
 					<a
 						href="https://docs.openwebui.com"
 						target="_blank"
@@ -638,7 +638,7 @@
 				<div class=" self-center truncate">{$i18n.t('Sign Out')}</div>
 			</button>
 
-			{#if showActiveUsers && ($config?.features?.enable_public_active_users_count || role === 'admin') && usage}
+			{#if showActiveUsers && ($config?.features?.enable_public_active_users_count || (role === 'admin' || role === 'superadmin')) && usage}
 				{#if usage?.user_count}
 					<hr class=" border-gray-50/30 dark:border-gray-800/30 my-1 p-0" />
 
@@ -650,7 +650,7 @@
 						<div
 							class="flex rounded-xl py-1 px-3 text-xs gap-2.5 items-center"
 							on:mouseenter={() => {
-								if ($config?.features?.enable_public_active_users_count || role === 'admin') {
+								if ($config?.features?.enable_public_active_users_count || (role === 'admin' || role === 'superadmin')) {
 									getUsageInfo();
 								}
 							}}

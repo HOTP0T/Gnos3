@@ -20,8 +20,8 @@
 		settings,
 		showFileNavPath,
 		selectedTerminalId,
-		user
-	} from '$lib/stores';
+		user,
+		isAdmin} from '$lib/stores';
 
 	import { uploadFile } from '$lib/apis/files';
 	import { toast } from 'svelte-sonner';
@@ -70,11 +70,11 @@
 
 	$: hasMessages = history?.messages && Object.keys(history.messages).length > 0;
 
-	$: showControlsTab = $user?.role === 'admin' || ($user?.permissions?.chat?.controls ?? true);
+	$: showControlsTab = $isAdmin || ($user?.permissions?.chat?.controls ?? true);
 	$: showFilesTab =
 		($selectedTerminalId &&
 			(($terminalServers ?? []).some((t) => t.id && t.id === $selectedTerminalId) ||
-				$user?.role === 'admin' ||
+				$isAdmin ||
 				($user?.permissions?.features?.direct_tool_servers ?? true))) ||
 		(codeInterpreterEnabled && $config?.code?.interpreter_engine !== 'jupyter');
 	$: showOverviewTab = hasMessages;
@@ -110,7 +110,7 @@
 	$: if (
 		$selectedTerminalId &&
 		!($terminalServers ?? []).some((t) => t.id && t.id === $selectedTerminalId) &&
-		!($user?.role === 'admin' || ($user?.permissions?.features?.direct_tool_servers ?? true))
+		!($isAdmin || ($user?.permissions?.features?.direct_tool_servers ?? true))
 	) {
 		selectedTerminalId.set(null);
 	}

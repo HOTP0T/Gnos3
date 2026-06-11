@@ -2,8 +2,8 @@
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { getGeneralLedger, getFullGeneralLedger, getAccounts, exportGeneralLedger } from '$lib/apis/accounting';
-	import { K4MI_BASE_URL } from '$lib/constants';
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 
 	const i18n = getContext('i18n');
 	export let companyId: number;
@@ -161,7 +161,7 @@
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30 {lineIdx === 0 && entryIdx > 0 ? 'border-t-2 border-gray-200 dark:border-gray-700' : ''}">
 									<td class="px-2 py-1.5 font-mono text-[10px]" title="ID: {entry.transaction_id}">{lineIdx === 0 ? (entry.entry_number || entry.transaction_id || '') : ''}</td>
 								<td class="px-2 py-1.5 font-mono">{lineIdx === 0 ? entry.period : ''}</td>
-									<td class="px-2 py-1.5">{#if lineIdx === 0 && entry.k4mi_document_id}<a href="{K4MI_BASE_URL}/documents/{entry.k4mi_document_id}/details" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline" title={$i18n.t('Open in K4mi')}>{entry.reference ?? ''} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline mb-0.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg></a>{:else if lineIdx === 0}{entry.reference ?? ''}{/if}</td>
+									<td class="px-2 py-1.5">{#if lineIdx === 0 && entry.k4mi_document_id}<K4miDocLink docId={entry.k4mi_document_id} title={$i18n.t('Open in K4mi')}>{entry.reference ?? ''} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline mb-0.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg></K4miDocLink>{:else if lineIdx === 0}{entry.reference ?? ''}{/if}</td>
 									<td class="px-2 py-1.5 max-w-[200px] truncate">{lineIdx === 0 ? (entry.description ?? '') : ''}</td>
 									<td class="px-2 py-1.5 font-mono">{line.account_code}</td>
 									<td class="px-2 py-1.5">{line.account_name}</td>
@@ -226,7 +226,7 @@
 									{/if}
 								</td>
 							{/if}
-							<td class="px-2 py-1.5">{#if entry.k4mi_document_id}<a href="{K4MI_BASE_URL}/documents/{entry.k4mi_document_id}/details" target="_blank" rel="noopener" class="text-blue-600 dark:text-blue-400 hover:underline" title={$i18n.t('Open in K4mi')}>{entry.reference ?? ''} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline mb-0.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg></a>{:else}{entry.reference ?? ''}{/if}</td>
+							<td class="px-2 py-1.5">{#if entry.k4mi_document_id}<K4miDocLink docId={entry.k4mi_document_id} title={$i18n.t('Open in K4mi')}>{entry.reference ?? ''} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline mb-0.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg></K4miDocLink>{:else}{entry.reference ?? ''}{/if}</td>
 							<td class="px-2 py-1.5">{entry.description ?? ''}</td>
 							<td class="px-2 py-1.5 text-right font-mono">{fmt(entry.debit)}</td>
 							<td class="px-2 py-1.5 text-right font-mono">{fmt(entry.credit)}</td>

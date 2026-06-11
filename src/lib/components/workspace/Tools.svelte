@@ -6,7 +6,7 @@
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, config, tools as _tools, user } from '$lib/stores';
+	import { WEBUI_NAME, config, tools as _tools, user, isAdmin} from '$lib/stores';
 
 	import { goto } from '$app/navigation';
 	import {
@@ -246,7 +246,7 @@
 			</div>
 
 			<div class="flex w-full justify-end gap-1.5">
-				{#if $user?.role === 'admin' || $user?.permissions?.workspace?.tools_import}
+				{#if $isAdmin || $user?.permissions?.workspace?.tools_import}
 					<button
 						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
 						on:click={() => {
@@ -259,7 +259,7 @@
 					</button>
 				{/if}
 
-				{#if tools.length && ($user?.role === 'admin' || $user?.permissions?.workspace?.tools_export)}
+				{#if tools.length && ($isAdmin || $user?.permissions?.workspace?.tools_export)}
 					<button
 						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
 						on:click={async () => {
@@ -282,7 +282,7 @@
 					</button>
 				{/if}
 
-				{#if $user?.role === 'admin'}
+				{#if $isAdmin}
 					<AddToolMenu
 						createHandler={() => {
 							goto('/workspace/tools/create');
@@ -562,7 +562,7 @@
 		{/if}
 	</div>
 
-	{#if $config?.features.enable_community_sharing && $user?.role === 'admin'}
+	{#if $config?.features.enable_community_sharing && $isAdmin}
 		<div class=" my-16">
 			<div class=" text-xl font-medium mb-1 line-clamp-1">
 				{$i18n.t('Made by Gnos3 Community')}

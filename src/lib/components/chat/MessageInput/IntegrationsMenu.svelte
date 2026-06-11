@@ -9,8 +9,8 @@
 		mobile,
 		settings,
 		toolServers,
-		terminalServers
-	} from '$lib/stores';
+		terminalServers,
+		isAdmin} from '$lib/stores';
 
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
 	import { deleteOAuthSession } from '$lib/apis/auths';
@@ -66,7 +66,7 @@
 	let fileUploadEnabled = true;
 	$: fileUploadEnabled =
 		fileUploadCapableModels.length === selectedModels.length &&
-		($user?.role === 'admin' || $user?.permissions?.chat?.file_upload);
+		($isAdmin || $user?.permissions?.chat?.file_upload);
 
 	const init = async () => {
 		if ($_tools === null) {
@@ -183,7 +183,7 @@
 										</div>
 									</div>
 
-									{#if filter?.has_user_valves && ($user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true))}
+									{#if filter?.has_user_valves && ($isAdmin || ($user?.permissions?.chat?.valves ?? true))}
 										<div class=" shrink-0">
 											<Tooltip content={$i18n.t('Valves')}>
 												<button
@@ -412,7 +412,7 @@
 								</div>
 							{/if}
 
-							{#if tools[toolId]?.has_user_valves && ($user?.role === 'admin' || ($user?.permissions?.chat?.valves ?? true))}
+							{#if tools[toolId]?.has_user_valves && ($isAdmin || ($user?.permissions?.chat?.valves ?? true))}
 								<div class=" shrink-0">
 									<Tooltip content={$i18n.t('Valves')}>
 										<button

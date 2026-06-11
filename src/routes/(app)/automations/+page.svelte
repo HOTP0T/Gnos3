@@ -3,7 +3,7 @@
 
 	import { toast } from 'svelte-sonner';
 	import { goto } from '$app/navigation';
-	import { WEBUI_NAME, mobile, showSidebar, user, config } from '$lib/stores';
+	import { WEBUI_NAME, mobile, showSidebar, user, config, isAdmin} from '$lib/stores';
 
 	import {
 		getAutomationItems,
@@ -167,7 +167,7 @@
 	onMount(async () => {
 		if (
 			!$config?.features?.enable_automations ||
-			($user?.role !== 'admin' && !($user?.permissions?.features?.automations ?? false))
+			(!$isAdmin && !($user?.permissions?.features?.automations ?? false))
 		) {
 			goto('/');
 			return;

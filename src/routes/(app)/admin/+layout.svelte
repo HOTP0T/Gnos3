@@ -2,7 +2,7 @@
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
 
-	import { WEBUI_NAME, config, mobile, showSidebar, user } from '$lib/stores';
+	import { WEBUI_NAME, config, mobile, showSidebar, user, isAdmin, isSuperadmin } from '$lib/stores';
 	import { page } from '$app/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 
@@ -13,7 +13,7 @@
 	let loaded = false;
 
 	onMount(async () => {
-		if ($user?.role !== 'admin') {
+		if (!$isAdmin) {
 			await goto('/');
 		}
 		loaded = true;
@@ -67,7 +67,9 @@
 							href="/admin">{$i18n.t('Users')}</a
 						>
 
-						{#if $config?.features.enable_admin_analytics ?? true}
+						<!-- RBAC: Analytics / Evaluations / Functions / Settings are
+						     platform-level admin pages, restricted to superadmin. -->
+						{#if $isSuperadmin && ($config?.features.enable_admin_analytics ?? true)}
 							<a
 								draggable="false"
 								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/analytics')
@@ -77,29 +79,42 @@
 							>
 						{/if}
 
+						{#if $isSuperadmin}
+							<a
+								draggable="false"
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/evaluations')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								href="/admin/evaluations">{$i18n.t('Evaluations')}</a
+							>
+
+							<a
+								draggable="false"
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/functions')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								href="/admin/functions">{$i18n.t('Functions')}</a
+							>
+						{/if}
+
+						<!-- Permissions tab visible to both admin and superadmin. -->
 						<a
 							draggable="false"
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/evaluations')
+							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/permissions')
 								? ''
 								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-							href="/admin/evaluations">{$i18n.t('Evaluations')}</a
+							href="/admin/permissions/companies">{$i18n.t('Permissions')}</a
 						>
 
-						<a
-							draggable="false"
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/functions')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-							href="/admin/functions">{$i18n.t('Functions')}</a
-						>
-
-						<a
-							draggable="false"
-							class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/settings')
-								? ''
-								: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
-							href="/admin/settings">{$i18n.t('Settings')}</a
-						>
+						{#if $isSuperadmin}
+							<a
+								draggable="false"
+								class="min-w-fit p-1.5 {$page.url.pathname.includes('/admin/settings')
+									? ''
+									: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'} transition select-none"
+								href="/admin/settings">{$i18n.t('Settings')}</a
+							>
+						{/if}
 					</div>
 				</div>
 			</div>

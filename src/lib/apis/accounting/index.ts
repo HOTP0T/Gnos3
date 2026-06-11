@@ -4,6 +4,25 @@ const BASE = `${INVOICE_API_BASE_URL}/api/accounting`;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+function getAuthToken(): string | null {
+	if (typeof localStorage === 'undefined') return null;
+	return localStorage.getItem('token');
+}
+
+function authHeaders(): Record<string, string> {
+	const token = getAuthToken();
+	return {
+		'Content-Type': 'application/json',
+		...(token ? { Authorization: `Bearer ${token}` } : {})
+	};
+}
+
+function uploadAuthHeaders(): Record<string, string> {
+	// FormData sets its own multipart Content-Type — never override it here.
+	const token = getAuthToken();
+	return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function parseErrorResponse(res: Response): Promise<any> {
 	try {
 		return await res.json();
@@ -22,7 +41,7 @@ async function apiGet(path: string, params?: Record<string, string | number | bo
 	}
 	const qs = searchParams.toString();
 	const url = qs ? `${BASE}${path}?${qs}` : `${BASE}${path}`;
-	const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+	const res = await fetch(url, { method: 'GET', headers: authHeaders() });
 	if (!res.ok) throw await parseErrorResponse(res);
 	return res.json();
 }
@@ -38,7 +57,7 @@ async function apiPost(path: string, body?: any, params?: Record<string, string 
 	const url = qs ? `${BASE}${path}?${qs}` : `${BASE}${path}`;
 	const res = await fetch(url, {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
+		headers: authHeaders(),
 		body: body !== undefined ? JSON.stringify(body) : undefined
 	});
 	if (!res.ok) throw await parseErrorResponse(res);
@@ -48,7 +67,7 @@ async function apiPost(path: string, body?: any, params?: Record<string, string 
 async function apiPatch(path: string, body: any) {
 	const res = await fetch(`${BASE}${path}`, {
 		method: 'PATCH',
-		headers: { 'Content-Type': 'application/json' },
+		headers: authHeaders(),
 		body: JSON.stringify(body)
 	});
 	if (!res.ok) throw await parseErrorResponse(res);
@@ -58,7 +77,7 @@ async function apiPatch(path: string, body: any) {
 async function apiDelete(path: string) {
 	const res = await fetch(`${BASE}${path}`, {
 		method: 'DELETE',
-		headers: { 'Content-Type': 'application/json' }
+		headers: authHeaders()
 	});
 	if (!res.ok) throw await parseErrorResponse(res);
 	if (res.status === 204) return;
@@ -76,6 +95,7 @@ async function apiUpload(path: string, formData: FormData, params?: Record<strin
 	const url = qs ? `${BASE}${path}?${qs}` : `${BASE}${path}`;
 	const res = await fetch(url, {
 		method: 'POST',
+		headers: uploadAuthHeaders(),
 		body: formData
 	});
 	if (!res.ok) throw await res.json();
@@ -460,7 +480,11 @@ export const bulkDeleteDrafts = async (companyId: number, transactionIds: number
 export const uploadAttachment = async (file: File): Promise<{ url: string; filename: string; size: number }> => {
 	const formData = new FormData();
 	formData.append('file', file);
-	const res = await fetch(`${BASE}/attachments/upload`, { method: 'POST', body: formData });
+	const res = await fetch(`${BASE}/attachments/upload`, {
+		method: 'POST',
+		headers: uploadAuthHeaders(),
+		body: formData
+	});
 	if (!res.ok) throw await res.json();
 	return res.json();
 };
@@ -550,7 +574,7 @@ export const getInvoiceList = async (params?: {
 	const url = qs
 		? `${INVOICE_API_BASE_URL}/api/invoices?${qs}`
 		: `${INVOICE_API_BASE_URL}/api/invoices`;
-	const res = await fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+	const res = await fetch(url, { method: 'GET', headers: authHeaders() });
 	if (!res.ok) throw await res.json();
 	return res.json();
 };
@@ -624,7 +648,7 @@ export const editBankStatementLine = async (lineId: number, data: Record<string,
 
 export const downloadExchangeRateTemplate = async () => {
 	const url = `${INVOICE_API_BASE_URL}/api/accounting/templates/exchange-rate-template`;
-	const res = await fetch(url);
+	const res = await fetch(url, { headers: authHeaders() });
 	if (!res.ok) throw new Error('Download failed');
 	const blob = await res.blob();
 	const a = document.createElement('a');
@@ -637,7 +661,9 @@ export const downloadExchangeRateTemplate = async () => {
 // ── Accounting AI (CPA-Qwen3) ──────────────────────────────────
 
 export const getAccountingAiStatus = async () => {
-	const res = await fetch(`${INVOICE_API_BASE_URL}/api/accounting/ai/status`);
+	const res = await fetch(`${INVOICE_API_BASE_URL}/api/accounting/ai/status`, {
+		headers: authHeaders()
+	});
 	if (!res.ok) throw new Error('Failed to get AI status');
 	return res.json();
 };
@@ -645,7 +671,7 @@ export const getAccountingAiStatus = async () => {
 export const aiCategorizeInvoice = async (invoiceId: number) => {
 	const res = await fetch(
 		`${INVOICE_API_BASE_URL}/api/accounting/invoices/${invoiceId}/ai-categorize`,
-		{ method: 'POST' }
+		{ method: 'POST', headers: authHeaders() }
 	);
 	if (!res.ok) throw new Error('AI categorization failed');
 	return res.json();
@@ -654,7 +680,7 @@ export const aiCategorizeInvoice = async (invoiceId: number) => {
 export const aiCategorizeAll = async (companyId: number) => {
 	const res = await fetch(
 		`${INVOICE_API_BASE_URL}/api/accounting/companies/${companyId}/ai-categorize-all`,
-		{ method: 'POST' }
+		{ method: 'POST', headers: authHeaders() }
 	);
 	if (!res.ok) throw new Error('Bulk AI categorization failed');
 	return res.json();
@@ -663,7 +689,7 @@ export const aiCategorizeAll = async (companyId: number) => {
 export const aiValidateTransaction = async (transactionId: number) => {
 	const res = await fetch(
 		`${INVOICE_API_BASE_URL}/api/accounting/transactions/${transactionId}/ai-validate`,
-		{ method: 'POST' }
+		{ method: 'POST', headers: authHeaders() }
 	);
 	if (!res.ok) throw new Error('AI validation failed');
 	return res.json();

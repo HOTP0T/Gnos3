@@ -35,8 +35,8 @@
 		showSearch,
 		showSidebar,
 		showControls,
-		mobile
-	} from '$lib/stores';
+		mobile,
+		isAdmin} from '$lib/stores';
 
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
 	import SettingsModal from '$lib/components/chat/SettingsModal.svelte';
@@ -192,7 +192,7 @@
 			await goto('/auth');
 			return;
 		}
-		if (!['user', 'admin'].includes($user?.role)) {
+		if (!['user', 'admin', 'superadmin'].includes($user?.role)) {
 			return;
 		}
 
@@ -286,7 +286,7 @@
 				} else if (isShortcutMatch(event, shortcuts[Shortcut.NEW_TEMPORARY_CHAT])) {
 					console.log('Shortcut triggered: NEW_TEMPORARY_CHAT');
 					event.preventDefault();
-					if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+					if (!$isAdmin && $user?.permissions?.chat?.temporary_enforced) {
 						temporaryChatEnabled.set(true);
 					} else {
 						temporaryChatEnabled.set(!$temporaryChatEnabled);
@@ -311,16 +311,16 @@
 		};
 		setupKeyboardShortcuts();
 
-		if ($user?.role === 'admin' && ($settings?.showChangelog ?? true)) {
+		if ($isAdmin && ($settings?.showChangelog ?? true)) {
 			showChangelog.set($settings?.version !== $config.version);
 		}
 
-		if ($user?.role === 'admin' || ($user?.permissions?.chat?.temporary ?? true)) {
+		if ($isAdmin || ($user?.permissions?.chat?.temporary ?? true)) {
 			if ($page.url.searchParams.get('temporary-chat') === 'true') {
 				temporaryChatEnabled.set(true);
 			}
 
-			if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+			if (!$isAdmin && $user?.permissions?.chat?.temporary_enforced) {
 				temporaryChatEnabled.set(true);
 			}
 		}
@@ -358,7 +358,7 @@
 		<div
 			class=" text-gray-700 dark:text-gray-100 bg-white dark:bg-gray-900 h-screen max-h-[100dvh] overflow-auto flex flex-row justify-end"
 		>
-			{#if !['user', 'admin'].includes($user?.role)}
+			{#if !['user', 'admin', 'superadmin'].includes($user?.role)}
 				<AccountPending />
 			{:else}
 				{#if localDBChats.length > 0}

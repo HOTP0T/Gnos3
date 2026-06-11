@@ -235,11 +235,13 @@
 								<td class="px-3 py-1 min-w-[7rem] w-28">
 									<div class=" translate-y-0.5">
 										<Badge
-											type={user.role === 'admin'
-												? 'info'
-												: user.role === 'user'
-													? 'success'
-													: 'muted'}
+											type={user.role === 'superadmin'
+												? 'warning'
+												: user.role === 'admin'
+													? 'info'
+													: user.role === 'user'
+														? 'success'
+														: 'muted'}
 											content={$i18n.t(user.role)}
 										/>
 									</div>

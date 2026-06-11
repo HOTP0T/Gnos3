@@ -45,7 +45,13 @@ export interface BusinessCardStats {
 	by_company: { company_name: string; count: number }[];
 }
 
-const headers = { 'Content-Type': 'application/json' };
+function authHeaders(): Record<string, string> {
+	const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+	return {
+		'Content-Type': 'application/json',
+		...(token ? { Authorization: `Bearer ${token}` } : {})
+	};
+}
 
 async function asJson<T>(res: Response): Promise<T> {
 	if (!res.ok) {
@@ -84,7 +90,7 @@ export const getBusinessCards = async (
 	}
 	const res = await fetch(
 		`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards?${search.toString()}`,
-		{ method: 'GET', headers }
+		{ method: 'GET', headers: authHeaders() }
 	);
 	return asJson(res);
 };
@@ -92,7 +98,7 @@ export const getBusinessCards = async (
 export const getBusinessCard = async (_token: string, id: number): Promise<BusinessCard> => {
 	const res = await fetch(`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}`, {
 		method: 'GET',
-		headers
+		headers: authHeaders()
 	});
 	return asJson(res);
 };
@@ -104,7 +110,7 @@ export const updateBusinessCard = async (
 ): Promise<BusinessCard> => {
 	const res = await fetch(`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}`, {
 		method: 'PATCH',
-		headers,
+		headers: authHeaders(),
 		body: JSON.stringify(data)
 	});
 	return asJson(res);
@@ -113,7 +119,7 @@ export const updateBusinessCard = async (
 export const deleteBusinessCard = async (_token: string, id: number): Promise<void> => {
 	const res = await fetch(`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}`, {
 		method: 'DELETE',
-		headers
+		headers: authHeaders()
 	});
 	if (!res.ok) {
 		const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -124,7 +130,7 @@ export const deleteBusinessCard = async (_token: string, id: number): Promise<vo
 export const getBusinessCardStats = async (_token: string): Promise<BusinessCardStats> => {
 	const res = await fetch(`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/stats`, {
 		method: 'GET',
-		headers
+		headers: authHeaders()
 	});
 	return asJson(res);
 };
@@ -132,7 +138,7 @@ export const getBusinessCardStats = async (_token: string): Promise<BusinessCard
 export const getBusinessCardCompanies = async (_token: string): Promise<string[]> => {
 	const res = await fetch(`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/companies`, {
 		method: 'GET',
-		headers
+		headers: authHeaders()
 	});
 	return asJson(res);
 };
@@ -140,7 +146,7 @@ export const getBusinessCardCompanies = async (_token: string): Promise<string[]
 export const getBusinessCardTags = async (_token: string): Promise<string[]> => {
 	const res = await fetch(`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/tags`, {
 		method: 'GET',
-		headers
+		headers: authHeaders()
 	});
 	return asJson(res);
 };
@@ -151,7 +157,7 @@ export const reprocessBusinessCard = async (
 ): Promise<{ status: string; task_id: string; document_id: number }> => {
 	const res = await fetch(
 		`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}/reprocess`,
-		{ method: 'POST', headers }
+		{ method: 'POST', headers: authHeaders() }
 	);
 	return asJson(res);
 };
@@ -162,7 +168,7 @@ export const syncBusinessCardFromK4mi = async (
 ): Promise<{ status: string; task_id: string; document_id: number }> => {
 	const res = await fetch(
 		`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}/sync`,
-		{ method: 'POST', headers }
+		{ method: 'POST', headers: authHeaders() }
 	);
 	return asJson(res);
 };

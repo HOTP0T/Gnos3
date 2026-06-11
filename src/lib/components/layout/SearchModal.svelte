@@ -13,7 +13,7 @@
 	import calendar from 'dayjs/plugin/calendar';
 	import Loader from '../common/Loader.svelte';
 	import { createMessagesList } from '$lib/utils';
-	import { config, user } from '$lib/stores';
+	import { config, user, isAdmin} from '$lib/stores';
 	import Messages from '../chat/Messages.svelte';
 	import { goto } from '$app/navigation';
 	import PencilSquare from '../icons/PencilSquare.svelte';
@@ -230,7 +230,7 @@
 		actions = [
 			...actions,
 			...(($config?.features?.enable_notes ?? false) &&
-			($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
+			($isAdmin || ($user?.permissions?.features?.notes ?? true))
 				? [
 						{
 							label: $i18n.t('Create a new note'),

@@ -19,7 +19,7 @@
 
 	import { formatPythonCode } from '$lib/apis/utils';
 	import { toast } from 'svelte-sonner';
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 
 	const dispatch = createEventDispatcher();
 	const i18n = getContext('i18n');
@@ -179,7 +179,7 @@ print("${endTag}")
 	export const formatPythonCodeHandler = async () => {
 		if (codeEditor) {
 			const res = await (
-				$user?.role === 'admin'
+				$isAdmin
 					? formatPythonCode(localStorage.token, _value)
 					: formatPythonCodePyodide(_value)
 			).catch((error) => {

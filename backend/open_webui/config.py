@@ -1601,6 +1601,38 @@ DEFAULT_USER_PERMISSIONS = {
     'settings': {
         'interface': USER_PERMISSIONS_SETTINGS_INTERFACE,
     },
+    # ─── Cross-stack RBAC (Gnos3-K4mi-Nexa data modules) ─────────────────
+    # Default deny: baseline users get NO module access. The seeded groups
+    # (Admins / Accountants / Document Operators / Viewers) grant True values.
+    # Per-company role assignments live under `companies` and are merged in
+    # from group permissions (Phase 3 adds those; not in defaults here).
+    'modules': {
+        'invoices': {
+            'read': False,
+            'write': False,
+            'reprocess': False,
+            'delete': False,
+        },
+        'business_cards': {
+            'read': False,
+            'write': False,
+            'reprocess': False,
+            'delete': False,
+        },
+        'accounting': {
+            'read': False,
+            'write': False,
+            'post': False,    # post / void journal entries, void match groups
+            'admin': False,   # delete company, chart/period mgmt, Excel import
+        },
+    },
+    'k4mi': {
+        'documents': {
+            'read': False,
+            'write': False,
+            'admin': False,
+        },
+    },
 }
 
 USER_PERMISSIONS = PersistentConfig(

@@ -144,7 +144,7 @@ async def check_channels_access(request: Request, user: Optional[UserModel] = No
         )
 
     if user:
-        if user.role != 'admin' and not await has_permission(
+        if user.role not in ('admin', 'superadmin') and not await has_permission(
             user.id, 'features.channels', request.app.state.config.USER_PERMISSIONS
         ):
             raise HTTPException(
@@ -221,7 +221,7 @@ async def get_all_channels(
     db: AsyncSession = Depends(get_async_session),
 ):
     await check_channels_access(request, user)
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         return await Channels.get_channels(db=db)
     return await Channels.get_channels_by_user_id(user.id, db=db)
 
@@ -298,7 +298,7 @@ async def create_new_channel(
 ):
     await check_channels_access(request, user)
 
-    if form_data.type not in ['group', 'dm'] and user.role != 'admin':
+    if form_data.type not in ['group', 'dm'] and user.role not in ('admin', 'superadmin'):
         # Only admins can create standard channels (joined by default)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -412,7 +412,7 @@ async def get_channel_by_id(
             }
         )
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(user.id, channel, permission='read', db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
         write_access = await channel_has_access(
@@ -436,7 +436,7 @@ async def get_channel_by_id(
                 'user_ids': user_ids,
                 'users': users,
                 'is_manager': await Channels.is_user_channel_manager(channel.id, user.id, db=db),
-                'write_access': write_access or user.role == 'admin',
+                'write_access': write_access or user.role in ('admin', 'superadmin'),
                 'user_count': user_count,
                 'last_read_at': channel_member.last_read_at if channel_member else None,
                 'unread_count': unread_count,
@@ -478,7 +478,7 @@ async def get_channel_members_by_id(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(user.id, channel, permission='read', db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     if channel.type == 'dm':
@@ -572,7 +572,7 @@ async def add_members_by_id(
     if not channel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if channel.user_id != user.id and user.role != 'admin':
+    if channel.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     try:
@@ -609,7 +609,7 @@ async def remove_members_by_id(
     if not channel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if channel.user_id != user.id and user.role != 'admin':
+    if channel.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     try:
@@ -640,7 +640,7 @@ async def update_channel_by_id(
     if not channel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if channel.user_id != user.id and user.role != 'admin':
+    if channel.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     form_data.access_grants = await filter_allowed_access_grants(
@@ -677,7 +677,7 @@ async def delete_channel_by_id(
     if not channel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if channel.user_id != user.id and user.role != 'admin':
+    if channel.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     try:
@@ -724,7 +724,7 @@ async def get_channel_messages(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(user.id, channel, permission='read', db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
         channel_member = await Channels.join_channel(id, user.id, db=db)  # Ensure user is a member of the channel
@@ -787,7 +787,7 @@ async def get_pinned_channel_messages(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(user.id, channel, permission='read', db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     page = max(1, page)
@@ -1043,7 +1043,7 @@ async def new_message_handler(request: Request, id: str, form_data: MessageForm,
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(
             user.id,
             channel,
             permission='write',
@@ -1175,7 +1175,7 @@ async def get_channel_message(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(user.id, channel, permission='read', db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     message = await Messages.get_message_by_id(message_id, db=db)
@@ -1216,7 +1216,7 @@ async def get_channel_message_data(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(user.id, channel, permission='read', db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     message = await Messages.get_message_by_id(message_id, db=db)
@@ -1256,7 +1256,7 @@ async def pin_channel_message(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(user.id, channel, permission='read', db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     message = await Messages.get_message_by_id(message_id, db=db)
@@ -1305,7 +1305,7 @@ async def get_channel_thread_messages(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(user.id, channel, permission='read', db=db):
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(user.id, channel, permission='read', db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     message_list = await Messages.get_messages_by_parent_id(id, message_id, skip, limit, db=db)
@@ -1370,7 +1370,7 @@ async def update_message_by_id(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
         if (
-            user.role != 'admin'
+            user.role not in ('admin', 'superadmin')
             and message.user_id != user.id
             and not await channel_has_access(user.id, channel, permission='write', strict=False, db=db)
         ):
@@ -1429,7 +1429,7 @@ async def add_reaction_to_message(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(
             user.id,
             channel,
             permission='write',
@@ -1496,7 +1496,7 @@ async def remove_reaction_by_id_and_user_id_and_name(
         if not await Channels.is_user_channel_member(channel.id, user.id, db=db):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
-        if user.role != 'admin' and not await channel_has_access(
+        if user.role not in ('admin', 'superadmin') and not await channel_has_access(
             user.id,
             channel,
             permission='write',
@@ -1571,7 +1571,7 @@ async def delete_message_by_id(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
     else:
         if (
-            user.role != 'admin'
+            user.role not in ('admin', 'superadmin')
             and message.user_id != user.id
             and not await channel_has_access(
                 user.id,
@@ -1681,7 +1681,7 @@ async def get_channel_webhooks(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     # Only channel managers can view webhooks
-    if not await Channels.is_user_channel_manager(channel.id, user.id, db=db) and user.role != 'admin':
+    if not await Channels.is_user_channel_manager(channel.id, user.id, db=db) and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.UNAUTHORIZED)
 
     return await Channels.get_webhooks_by_channel_id(id, db=db)
@@ -1701,7 +1701,7 @@ async def create_channel_webhook(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     # Only channel managers can create webhooks
-    if not await Channels.is_user_channel_manager(channel.id, user.id, db=db) and user.role != 'admin':
+    if not await Channels.is_user_channel_manager(channel.id, user.id, db=db) and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.UNAUTHORIZED)
 
     webhook = await Channels.insert_webhook(id, user.id, form_data, db=db)
@@ -1726,7 +1726,7 @@ async def update_channel_webhook(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     # Only channel managers can update webhooks
-    if not await Channels.is_user_channel_manager(channel.id, user.id, db=db) and user.role != 'admin':
+    if not await Channels.is_user_channel_manager(channel.id, user.id, db=db) and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.UNAUTHORIZED)
 
     webhook = await Channels.get_webhook_by_id(webhook_id, db=db)
@@ -1754,7 +1754,7 @@ async def delete_channel_webhook(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
     # Only channel managers can delete webhooks
-    if not await Channels.is_user_channel_manager(channel.id, user.id, db=db) and user.role != 'admin':
+    if not await Channels.is_user_channel_manager(channel.id, user.id, db=db) and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.UNAUTHORIZED)
 
     webhook = await Channels.get_webhook_by_id(webhook_id, db=db)

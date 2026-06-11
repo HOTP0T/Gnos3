@@ -119,7 +119,7 @@ async def get_models(
     groups = await Groups.get_groups_by_member_id(user.id, db=db)
     user_group_ids = {group.id for group in groups}
 
-    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not user.role in ('admin', 'superadmin') or not BYPASS_ADMIN_ACCESS_CONTROL:
         if groups:
             filter['group_ids'] = [group.id for group in groups]
 
@@ -148,7 +148,7 @@ async def get_models(
             ModelAccessResponse(
                 **data,
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == model.user_id
                     or model.id in writable_model_ids
                 ),
@@ -180,7 +180,7 @@ async def get_base_models(user=Depends(get_admin_user), db: AsyncSession = Depen
 async def get_model_tags(user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
     tags = await Models.get_all_tags(
         user_id=user.id,
-        is_admin=(user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL),
+        is_admin=(user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL),
         db=db,
     )
     return sorted(tags)
@@ -198,7 +198,7 @@ async def create_new_model(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'workspace.models', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -249,7 +249,7 @@ async def export_models(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id,
         'workspace.models_export',
         request.app.state.config.USER_PERMISSIONS,
@@ -260,7 +260,7 @@ async def export_models(
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
 
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL:
         return await Models.get_models(db=db)
     else:
         return await Models.get_models_by_user_id(user.id, db=db)
@@ -282,7 +282,7 @@ async def import_models(
     form_data: ModelsImportForm = (...),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id,
         'workspace.models_import',
         request.app.state.config.USER_PERMISSIONS,
@@ -308,7 +308,7 @@ async def import_models(
             # Batch-resolve write permissions in one query instead of
             # per-model has_access calls (N+1 avoidance).
             existing_model_ids = list(existing_models.keys())
-            if user.role != 'admin' and existing_model_ids:
+            if user.role not in ('admin', 'superadmin') and existing_model_ids:
                 groups = await Groups.get_groups_by_member_id(user.id, db=db)
                 user_group_ids = {group.id for group in groups}
                 writable_model_ids = await AccessGrants.get_accessible_resource_ids(
@@ -330,7 +330,7 @@ async def import_models(
                     if existing_model:
                         # Enforce ownership/write-access before allowing overwrite
                         if (
-                            user.role != 'admin'
+                            user.role not in ('admin', 'superadmin')
                             and existing_model.user_id != user.id
                             and model_id not in writable_model_ids
                         ):
@@ -413,7 +413,7 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
     model = await Models.get_model_by_id(id, db=db)
     if model:
         if (
-            (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+            (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
             or model.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -426,7 +426,7 @@ async def get_model_by_id(id: str, user=Depends(get_verified_user), db: AsyncSes
             return ModelAccessResponse(
                 **model.model_dump(),
                 write_access=(
-                    (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                    (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                     or user.id == model.user_id
                     or await AccessGrants.has_access(
                         user_id=user.id,
@@ -514,7 +514,7 @@ async def toggle_model_by_id(id: str, user=Depends(get_verified_user), db: Async
     model = await Models.get_model_by_id(id, db=db)
     if model:
         if (
-            user.role == 'admin'
+            user.role in ('admin', 'superadmin')
             or model.user_id == user.id
             or await AccessGrants.has_access(
                 user_id=user.id,
@@ -573,7 +573,7 @@ async def update_model_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -615,7 +615,7 @@ async def update_model_access_by_id(
     # Non-preset models (e.g. direct Ollama/OpenAI models) may not have a DB
     # entry yet. Create a minimal one so access grants can be stored.
     if not model:
-        if user.role != 'admin':
+        if user.role not in ('admin', 'superadmin'):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
@@ -645,7 +645,7 @@ async def update_model_access_by_id(
             permission='write',
             db=db,
         )
-        and user.role != 'admin'
+        and user.role not in ('admin', 'superadmin')
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -686,7 +686,7 @@ async def delete_model_by_id(
         )
 
     if (
-        user.role != 'admin'
+        user.role not in ('admin', 'superadmin')
         and model.user_id != user.id
         and not await AccessGrants.has_access(
             user_id=user.id,

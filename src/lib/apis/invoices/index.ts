@@ -42,7 +42,8 @@ export const getInvoices = async (
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices?${searchParams.toString()}`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {
@@ -75,7 +76,8 @@ export const getInvoice = async (token: string, id: number) => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/${id}`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {
@@ -101,7 +103,8 @@ export const updateInvoice = async (token: string, id: number, data: Record<stri
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/${id}`, {
 		method: 'PATCH',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		},
 		body: JSON.stringify(data)
 	})
@@ -128,7 +131,8 @@ export const deleteInvoice = async (token: string, id: number) => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/${id}`, {
 		method: 'DELETE',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {
@@ -154,7 +158,8 @@ export const getVendors = async (token: string) => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/vendors`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {
@@ -177,7 +182,8 @@ export const getVendors = async (token: string) => {
 export const getTags = async (token: string): Promise<string[]> => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/tags`, {
 		method: 'GET',
-		headers: { 'Content-Type': 'application/json' }
+		headers: { 'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}` }
 	})
 		.then(async (res) => {
 			if (!res.ok) throw await res.json();
@@ -208,7 +214,8 @@ export const getSpendingSummary = async (
 		{
 			method: 'GET',
 			headers: {
-				'Content-Type': 'application/json'
+				'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 			}
 		}
 	)
@@ -235,7 +242,8 @@ export const getProcessingInvoices = async (token: string) => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices?status=processing&limit=50`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {
@@ -267,7 +275,8 @@ export const getInvoiceStats = async (token: string) => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/stats`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {
@@ -293,7 +302,8 @@ export const reprocessInvoice = async (token: string, id: number) => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/${id}/reprocess`, {
 		method: 'POST',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {
@@ -319,7 +329,8 @@ export const getNeedsReview = async (token: string) => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/needs-review`, {
 		method: 'GET',
 		headers: {
-			'Content-Type': 'application/json'
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
 		}
 	})
 		.then(async (res) => {

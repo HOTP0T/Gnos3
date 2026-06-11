@@ -34,6 +34,7 @@ from open_webui.internal.db import get_async_session
 
 
 from open_webui.utils.auth import (
+    get_admin_or_above_user,
     get_admin_user,
     get_password_hash,
     get_verified_user,
@@ -63,7 +64,7 @@ async def get_users(
     order_by: Optional[str] = None,
     direction: Optional[str] = None,
     page: Optional[int] = 1,
-    user=Depends(get_admin_user),
+    user=Depends(get_admin_or_above_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     limit = PAGE_ITEM_COUNT
@@ -106,7 +107,7 @@ async def get_users(
 
 @router.get('/all', response_model=UserInfoListResponse)
 async def get_all_users(
-    user=Depends(get_admin_user),
+    user=Depends(get_admin_or_above_user),
     db: AsyncSession = Depends(get_async_session),
 ):
     return await Users.get_users(db=db)
@@ -249,6 +250,7 @@ class UserPermissions(BaseModel):
     settings: SettingsPermissions
 
 
+# Platform-level: changing default permissions for ALL new users — superadmin only.
 @router.get('/default/permissions', response_model=UserPermissions)
 async def get_default_user_permissions(request: Request, user=Depends(get_admin_user)):
     return {
@@ -295,7 +297,7 @@ async def update_user_settings_by_session_user(
     updated_user_settings = form_data.model_dump()
     ui_settings = updated_user_settings.get('ui')
     if (
-        user.role != 'admin'
+        user.role not in ('admin', 'superadmin')
         and ui_settings is not None
         and 'toolServers' in ui_settings.keys()
         and not await has_permission(
@@ -413,7 +415,7 @@ class UserActiveResponse(UserStatus):
 
 
 @router.get('/{user_id}', response_model=UserActiveResponse)
-async def get_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def get_user_by_id(user_id: str, user=Depends(get_admin_or_above_user), db: AsyncSession = Depends(get_async_session)):
 
     user = await Users.get_user_by_id(user_id, db=db)
     if user:
@@ -455,7 +457,7 @@ async def get_user_info_by_id(
 
 @router.get('/{user_id}/oauth/sessions')
 async def get_user_oauth_sessions_by_id(
-    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+    user_id: str, user=Depends(get_admin_or_above_user), db: AsyncSession = Depends(get_async_session)
 ):
     sessions = await OAuthSessions.get_sessions_by_user_id(user_id, db=db)
     if sessions and len(sessions) > 0:
@@ -528,23 +530,22 @@ async def get_user_active_status_by_id(
 async def update_user_by_id(
     user_id: str,
     form_data: UserUpdateForm,
-    session_user=Depends(get_admin_user),
+    session_user=Depends(get_admin_or_above_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    # Prevent modification of the primary admin user by other admins
+    # Prevent modification of the primary superadmin user by anyone but themselves
     try:
         first_user = await Users.get_first_user(db=db)
         if first_user:
             if user_id == first_user.id:
                 if session_user.id != user_id:
-                    # If the user trying to update is the primary admin, and they are not the primary admin themselves
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail=ERROR_MESSAGES.ACTION_PROHIBITED,
                     )
 
-                if form_data.role is not None and form_data.role != 'admin':
-                    # If the primary admin is trying to change their own role, prevent it
+                if form_data.role is not None and form_data.role != 'superadmin':
+                    # Primary superadmin cannot demote themselves — would lock the system.
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail=ERROR_MESSAGES.ACTION_PROHIBITED,
@@ -559,7 +560,31 @@ async def update_user_by_id(
             detail='Could not verify primary admin status.',
         )
 
-    user = await Users.get_user_by_id(user_id, db=db)
+    target_user = await Users.get_user_by_id(user_id, db=db)
+
+    # Phase 3.7 RBAC: the admin (data-admin) tier can manage its peers —
+    # promote/demote/edit users at pending/user/admin tiers freely. The
+    # only thing locked off is the superadmin tier above them: admins
+    # cannot touch existing superadmins and cannot promote anyone to
+    # superadmin. Superadmin itself has no restrictions.
+    #
+    # NOTE: the `session_user.role == 'admin'` check is INTENTIONALLY narrow
+    # (gates the lesser admin tier only). Do not widen to include
+    # 'superadmin' — a previous bulk sed accidentally did this and the
+    # gate then fired for superadmins too, blocking all role changes.
+    if session_user.role == 'admin' and session_user.id != user_id:
+        if target_user is not None and target_user.role == 'superadmin':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='Admins cannot modify superadmin accounts. Ask a superadmin.',
+            )
+        if form_data.role is not None and form_data.role == 'superadmin':
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail='Admins cannot promote users to superadmin. Ask a superadmin.',
+            )
+
+    user = target_user
 
     if user:
         if form_data.email is not None and form_data.email.lower() != user.email:
@@ -624,7 +649,7 @@ async def update_user_by_id(
 
 
 @router.delete('/{user_id}', response_model=bool)
-async def delete_user_by_id(user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)):
+async def delete_user_by_id(user_id: str, user=Depends(get_admin_or_above_user), db: AsyncSession = Depends(get_async_session)):
     # Prevent deletion of the primary admin user
     try:
         first_user = await Users.get_first_user(db=db)
@@ -668,6 +693,6 @@ async def delete_user_by_id(user_id: str, user=Depends(get_admin_user), db: Asyn
 
 @router.get('/{user_id}/groups')
 async def get_user_groups_by_id(
-    user_id: str, user=Depends(get_admin_user), db: AsyncSession = Depends(get_async_session)
+    user_id: str, user=Depends(get_admin_or_above_user), db: AsyncSession = Depends(get_async_session)
 ):
     return await Groups.get_groups_by_member_id(user_id, db=db)

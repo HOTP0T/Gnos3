@@ -48,8 +48,8 @@
 		showFileNavPath,
 		showFileNavDir,
 		chatRequestQueues,
-		desktopEvent
-	} from '$lib/stores';
+		desktopEvent,
+		isAdmin} from '$lib/stores';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
@@ -356,7 +356,7 @@
 				if (
 					model.info?.meta?.capabilities?.['image_generation'] &&
 					$config?.features?.enable_image_generation &&
-					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+					($isAdmin || $user?.permissions?.features?.image_generation)
 				) {
 					imageGenerationEnabled = model.info.meta.defaultFeatureIds.includes('image_generation');
 				}
@@ -364,7 +364,7 @@
 				if (
 					model.info?.meta?.capabilities?.['web_search'] &&
 					$config?.features?.enable_web_search &&
-					($user?.role === 'admin' || $user?.permissions?.features?.web_search)
+					($isAdmin || $user?.permissions?.features?.web_search)
 				) {
 					webSearchEnabled = model.info.meta.defaultFeatureIds.includes('web_search');
 				}
@@ -372,7 +372,7 @@
 				if (
 					model.info?.meta?.capabilities?.['code_interpreter'] &&
 					$config?.features?.enable_code_interpreter &&
-					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
+					($isAdmin || $user?.permissions?.features?.code_interpreter)
 				) {
 					codeInterpreterEnabled = model.info.meta.defaultFeatureIds.includes('code_interpreter');
 				}
@@ -951,7 +951,7 @@
 	};
 
 	const uploadWeb = async (urls) => {
-		if ($user?.role !== 'admin' && !($user?.permissions?.chat?.web_upload ?? true)) {
+		if (!$isAdmin && !($user?.permissions?.chat?.web_upload ?? true)) {
 			toast.error($i18n.t('You do not have permission to upload web content.'));
 			return;
 		}
@@ -1077,7 +1077,7 @@
 
 	const initNewChat = async () => {
 		console.log('initNewChat');
-		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+		if (!$isAdmin && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		}
 
@@ -1090,7 +1090,7 @@
 			}
 		}
 
-		if ($user?.role !== 'admin' && !$user?.permissions?.chat?.temporary) {
+		if (!$isAdmin && !$user?.permissions?.chat?.temporary) {
 			await temporaryChatEnabled.set(false);
 		}
 
@@ -1338,7 +1338,7 @@
 						? chatContent.models
 						: [chatContent.models ?? ''];
 
-				if (!($user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true))) {
+				if (!($isAdmin || ($user?.permissions?.chat?.multiple_models ?? true))) {
 					selectedModels = selectedModels.length > 0 ? [selectedModels[0]] : [''];
 				}
 
@@ -2098,17 +2098,17 @@
 				voice: $showCallOverlay,
 				image_generation:
 					$config?.features?.enable_image_generation &&
-					($user?.role === 'admin' || $user?.permissions?.features?.image_generation)
+					($isAdmin || $user?.permissions?.features?.image_generation)
 						? imageGenerationEnabled
 						: false,
 				code_interpreter:
 					$config?.features?.enable_code_interpreter &&
-					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
+					($isAdmin || $user?.permissions?.features?.code_interpreter)
 						? codeInterpreterEnabled
 						: false,
 				web_search:
 					$config?.features?.enable_web_search &&
-					($user?.role === 'admin' || $user?.permissions?.features?.web_search)
+					($isAdmin || $user?.permissions?.features?.web_search)
 						? webSearchEnabled
 						: false
 			};

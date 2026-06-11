@@ -652,6 +652,16 @@ async def lifespan(app: FastAPI):
             # Disable signup since we now have an admin
             app.state.config.ENABLE_SIGNUP = False
 
+    # Cross-stack RBAC: seed the four canonical groups (Admins, Accountants,
+    # Document Operators, Viewers) if they don't already exist. Idempotent —
+    # existing groups are left untouched. Silently defers if no users exist
+    # yet (very-first boot).
+    try:
+        from open_webui.utils.rbac_seed import ensure_default_rbac_groups
+        await ensure_default_rbac_groups()
+    except Exception as exc:
+        log.warning(f'RBAC seed failed (non-fatal): {exc}')
+
     if SAFE_MODE:
         await Functions.deactivate_all_functions()
 
@@ -1585,7 +1595,7 @@ async def chat_completion(
             model_info = await Models.get_model_by_id(model_id)
 
             # Check if user has access to the model
-            if not BYPASS_MODEL_ACCESS_CONTROL and (user.role != 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL):
+            if not BYPASS_MODEL_ACCESS_CONTROL and (user.role not in ('admin', 'superadmin') or not BYPASS_ADMIN_ACCESS_CONTROL):
                 try:
                     await check_model_access(user, model)
                 except Exception as e:
@@ -1755,7 +1765,7 @@ async def chat_completion(
                             pass
                 else:
                     # Existing chat — verify ownership
-                    if not await Chats.is_chat_owner(chat_id, user.id) and user.role != 'admin':
+                    if not await Chats.is_chat_owner(chat_id, user.id) and user.role not in ('admin', 'superadmin'):
                         raise HTTPException(
                             status_code=status.HTTP_404_NOT_FOUND,
                             detail=ERROR_MESSAGES.DEFAULT(),
@@ -2156,11 +2166,11 @@ async def list_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     if chat_id.startswith('local:'):
         socket_id = chat_id[len('local:') :]
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and user.role != 'admin':
+        if owner_id != user.id and user.role not in ('admin', 'superadmin'):
             return {'task_ids': []}
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        if chat is None or (chat.user_id != user.id and user.role not in ('admin', 'superadmin')):
             return {'task_ids': []}
 
     task_ids = await list_task_ids_by_item_id(request.app.state.redis, chat_id)
@@ -2174,11 +2184,11 @@ async def stop_tasks_by_chat_id_endpoint(request: Request, chat_id: str, user=De
     if chat_id.startswith('local:'):
         socket_id = chat_id[len('local:') :]
         owner_id = get_user_id_from_session_pool(socket_id)
-        if owner_id != user.id and user.role != 'admin':
+        if owner_id != user.id and user.role not in ('admin', 'superadmin'):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     else:
         chat = await Chats.get_chat_by_id(chat_id)
-        if chat is None or (chat.user_id != user.id and user.role != 'admin'):
+        if chat is None or (chat.user_id != user.id and user.role not in ('admin', 'superadmin')):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
     result = await stop_item_tasks(request.app.state.redis, chat_id)
     return result
@@ -2329,11 +2339,11 @@ async def get_app_config(request: Request):
                     {
                         'active_entries': app.state.USER_COUNT,
                     }
-                    if user.role == 'admin'
+                    if user.role in ('admin', 'superadmin')
                     else {}
                 ),
             }
-            if user is not None and (user.role in ['admin', 'user'])
+            if user is not None and (user.role in ['admin', 'user', 'superadmin'])
             else {
                 **(
                     {
@@ -2421,7 +2431,7 @@ async def get_current_usage(user=Depends(get_verified_user)):
     """
     try:
         # If public visibility is disabled, only allow admins to access this endpoint
-        if not ENABLE_PUBLIC_ACTIVE_USERS_COUNT and user.role != 'admin':
+        if not ENABLE_PUBLIC_ACTIVE_USERS_COUNT and user.role not in ('admin', 'superadmin'):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail='Access denied. Only administrators can view usage statistics.',

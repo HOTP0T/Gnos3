@@ -11,7 +11,7 @@
 	import { goto } from '$app/navigation';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, config, mobile, models as _models, settings, user } from '$lib/stores';
+	import { WEBUI_NAME, config, mobile, models as _models, settings, user, isAdmin} from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import {
 		createNewModel,
@@ -399,7 +399,7 @@
 			</div>
 
 			<div class="flex w-full justify-end gap-1.5">
-				{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models_import}
+				{#if $isAdmin || $user?.permissions?.workspace?.models_import}
 					<button
 						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
 						on:click={() => {
@@ -412,7 +412,7 @@
 					</button>
 				{/if}
 
-				{#if total && ($user?.role === 'admin' || $user?.permissions?.workspace?.models_export)}
+				{#if total && ($isAdmin || $user?.permissions?.workspace?.models_export)}
 					<button
 						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
 						on:click={async () => {
@@ -803,7 +803,7 @@
 		{/if}
 	</div>
 
-	{#if $config?.features.enable_community_sharing && $user?.role === 'admin'}
+	{#if $config?.features.enable_community_sharing && $isAdmin}
 		<div class=" my-16">
 			<div class=" text-xl font-medium mb-1 line-clamp-1">
 				{$i18n.t('Made by Gnos3 Community')}

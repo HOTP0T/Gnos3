@@ -22,8 +22,8 @@
 		mobile,
 		temporaryChatEnabled,
 		settings,
-		config
-	} from '$lib/stores';
+		config,
+		isAdmin} from '$lib/stores';
 	import { toast } from 'svelte-sonner';
 	import { capitalizeFirstLetter, sanitizeResponseContent, splitStream } from '$lib/utils';
 	import { getModels } from '$lib/apis';
@@ -694,7 +694,7 @@
 
 					<div class="px-2.5 group relative">
 						{#if filteredItems.length === 0}
-							{#if items.length === 0 && $user?.role === 'admin'}
+							{#if items.length === 0 && $isAdmin}
 								<div class="flex flex-col items-start justify-center py-6 px-4 text-start">
 									<div class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
 										{$i18n.t('No models available')}
@@ -753,7 +753,7 @@
 							</div>
 						{/if}
 
-						{#if !(searchValue.trim() in $MODEL_DOWNLOAD_POOL) && searchValue && ollamaVersion && $user?.role === 'admin'}
+						{#if !(searchValue.trim() in $MODEL_DOWNLOAD_POOL) && searchValue && ollamaVersion && $isAdmin}
 							<Tooltip
 								content={$i18n.t(`Pull "{{searchValue}}" from Ollama.com`, {
 									searchValue: searchValue

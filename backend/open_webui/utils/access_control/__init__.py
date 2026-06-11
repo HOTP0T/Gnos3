@@ -159,7 +159,7 @@ async def has_connection_access(
     """
     from open_webui.config import BYPASS_ADMIN_ACCESS_CONTROL
 
-    if user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL:
+    if user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL:
         return True
 
     if user_group_ids is None:
@@ -222,7 +222,7 @@ async def filter_allowed_access_grants(
     Checks if the user has the required permissions to grant access to a resource.
     Returns the filtered list of access grants if permissions are missing.
     """
-    if user_role == 'admin' or not access_grants:
+    if user_role in ('admin', 'superadmin') or not access_grants:
         return access_grants
 
     # Check if user can share publicly
@@ -342,5 +342,5 @@ async def check_model_access(
             if not await has_base_model_access(user.id, model_info, user_group_ids=user_group_ids):
                 raise HTTPException(status_code=403, detail='Model not found')
     else:
-        if user.role != 'admin':
+        if user.role not in ('admin', 'superadmin'):
             raise HTTPException(status_code=403, detail='Model not found')

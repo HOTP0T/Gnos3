@@ -3,6 +3,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import { onMount, getContext } from 'svelte';
 	import { addUser } from '$lib/apis/auths';
+	import { isSuperadmin } from '$lib/stores';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -187,9 +188,16 @@
 										placeholder={$i18n.t('Enter Your Role')}
 										required
 									>
+										<!-- Phase 3.7 RBAC: admin tier can create peers (admin),
+										     but only superadmin can grant the superadmin tier.
+										     Backend enforces this via the role-edit guard in
+										     users.py:571 — UI mirrors. -->
 										<option value="pending"> {$i18n.t('pending')} </option>
 										<option value="user"> {$i18n.t('user')} </option>
 										<option value="admin"> {$i18n.t('admin')} </option>
+										{#if $isSuperadmin}
+											<option value="superadmin"> {$i18n.t('superadmin')} </option>
+										{/if}
 									</select>
 								</div>
 							</div>

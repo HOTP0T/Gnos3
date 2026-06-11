@@ -142,9 +142,19 @@
 												class="w-full text-sm bg-transparent disabled:text-gray-500 dark:disabled:text-gray-500 outline-hidden"
 												bind:value={_user.role}
 												aria-label={$i18n.t('Role')}
-												disabled={_user.id == sessionUser.id}
+												disabled={_user.id == sessionUser.id ||
+													(sessionUser?.role === 'admin' &&
+														selectedUser?.role === 'superadmin')}
 												required
 											>
+												<!-- Phase 3.7 RBAC: superadmin is the only option gated
+												     to current-user being superadmin. Admin tier can
+												     manage peers (set role to admin/user/pending) but
+												     not promote anyone to superadmin. Backend mirrors
+												     this in users.py:571. -->
+												{#if sessionUser?.role === 'superadmin'}
+													<option value="superadmin">{$i18n.t('Superadmin')}</option>
+												{/if}
 												<option value="admin">{$i18n.t('Admin')}</option>
 												<option value="user">{$i18n.t('User')}</option>
 												<option value="pending">{$i18n.t('Pending')}</option>

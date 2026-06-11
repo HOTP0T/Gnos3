@@ -29,8 +29,8 @@
 		selectedFolder,
 		WEBUI_NAME,
 		sidebarWidth,
-		activeChatIds
-	} from '$lib/stores';
+		activeChatIds,
+		isAdmin} from '$lib/stores';
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	import { enabledModules, ensureModulesLoaded } from '$lib/stores/modules';
 
@@ -41,10 +41,27 @@
 		invoices: '/invoices/dashboard',
 		business_cards: '/business-cards/dashboard'
 	};
+	// RBAC: pick the first enabled module the user actually has read access to.
+	// Admins see whatever's enabled. Non-admins with no module read perms see null
+	// → the {#if dataTabHref} wrapper below hides the entire "Data" entry.
+	// Svelte 5 requires `$store` subscriptions at the top level of reactive
+	// statements — not inside nested functions. So we mirror each store read
+	// into its own `$:` first, then compose them.
+	$: _isAdminNow = $isAdmin;
+	$: _modulesNow = $enabledModules;
+	$: _userPermsNow = $user?.permissions;
 	$: dataTabHref = (() => {
-		const first = $enabledModules.find((m) => DATA_TAB_HREF[m.name]);
+		const first = _modulesNow.find((m) => {
+			if (!DATA_TAB_HREF[m.name]) return false;
+			if (_isAdminNow) return true;
+			return Boolean(_userPermsNow?.modules?.[m.name]?.read);
+		});
 		return first ? DATA_TAB_HREF[first.name] : null;
 	})();
+
+	// RBAC: show the Accounting sidebar entry only if user has the read perm.
+	$: accountingVisible =
+		$isAdmin || Boolean($user?.permissions?.modules?.accounting?.read);
 
 	import {
 		getChatList,
@@ -122,11 +139,11 @@
 			case 'notes':
 				return (
 					($config?.features?.enable_notes ?? false) &&
-					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
+					($isAdmin || ($user?.permissions?.features?.notes ?? true))
 				);
 			case 'workspace':
 				return (
-					$user?.role === 'admin' ||
+					$isAdmin ||
 					$user?.permissions?.workspace?.models ||
 					$user?.permissions?.workspace?.knowledge ||
 					$user?.permissions?.workspace?.prompts ||
@@ -135,15 +152,15 @@
 			case 'automations':
 				return (
 					$config?.features?.enable_automations &&
-					($user?.role === 'admin' || $user?.permissions?.features?.automations)
+					($isAdmin || $user?.permissions?.features?.automations)
 				);
 			case 'calendar':
 				return (
 					$config?.features?.enable_calendar &&
-					($user?.role === 'admin' || $user?.permissions?.features?.calendar)
+					($isAdmin || $user?.permissions?.features?.calendar)
 				);
 			case 'playground':
-				return $user?.role === 'admin';
+				return $isAdmin;
 			default:
 				return false;
 		}
@@ -315,7 +332,7 @@
 			await (async () => {
 				if (
 					$config?.features?.enable_notes &&
-					($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))
+					($isAdmin || ($user?.permissions?.features?.notes ?? true))
 				) {
 					console.log('Init pinned notes');
 					const _pinnedNotes = await getPinnedNoteList(localStorage.token).catch(() => []);
@@ -566,7 +583,7 @@
 					// Only fetch channels if the feature is enabled and user has permission
 					if (
 						$config?.features?.enable_channels &&
-						($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))
+						($isAdmin || ($user?.permissions?.features?.channels ?? true))
 					) {
 						await initChannels();
 					}
@@ -662,7 +679,7 @@
 		selectedChatId = null;
 		selectedFolder.set(null);
 
-		if ($user?.role !== 'admin' && $user?.permissions?.chat?.temporary_enforced) {
+		if (!$isAdmin && $user?.permissions?.chat?.temporary_enforced) {
 			await temporaryChatEnabled.set(true);
 		} else {
 			await temporaryChatEnabled.set(false);
@@ -1263,7 +1280,8 @@
 
 						{/if}
 
-							<!-- Accounting -->
+							<!-- Accounting (visible only when user has accounting.read perm) -->
+							{#if accountingVisible}
 						<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 							<a
 								id="sidebar-accounting-button"
@@ -1294,6 +1312,7 @@
 								</div>
 							</a>
 						</div>
+							{/if}
 					</div>
 				</div>
 
@@ -1310,7 +1329,7 @@
 					</Folder>
 				{/if}
 
-				{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true)) && $pinnedNotes.length > 0}
+				{#if ($config?.features?.enable_notes ?? false) && ($isAdmin || ($user?.permissions?.features?.notes ?? true)) && $pinnedNotes.length > 0}
 					<Folder
 						id="sidebar-pinned-notes"
 						bind:open={showPinnedNotes}
@@ -1374,7 +1393,7 @@
 					</Folder>
 				{/if}
 
-				{#if $config?.features?.enable_channels && ($user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true))}
+				{#if $config?.features?.enable_channels && ($isAdmin || ($user?.permissions?.features?.channels ?? true))}
 					<Folder
 						id="sidebar-channels"
 						bind:open={showChannels}
@@ -1382,7 +1401,7 @@
 						name={$i18n.t('Channels')}
 						chevron={false}
 						dragAndDrop={false}
-						onAdd={$user?.role === 'admin' || ($user?.permissions?.features?.channels ?? true)
+						onAdd={$isAdmin || ($user?.permissions?.features?.channels ?? true)
 							? async () => {
 									await tick();
 
@@ -1409,7 +1428,7 @@
 					</Folder>
 				{/if}
 
-				{#if $config?.features?.enable_folders && ($user?.role === 'admin' || ($user?.permissions?.features?.folders ?? true))}
+				{#if $config?.features?.enable_folders && ($isAdmin || ($user?.permissions?.features?.folders ?? true))}
 					<Folder
 						id="sidebar-folders"
 						bind:open={showFolders}

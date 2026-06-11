@@ -8,8 +8,8 @@
 		mobile,
 		models,
 		knowledge,
-		tools
-	} from '$lib/stores';
+		tools,
+		isAdmin} from '$lib/stores';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -20,7 +20,7 @@
 	let loaded = false;
 
 	onMount(async () => {
-		if ($user?.role !== 'admin') {
+		if (!$isAdmin) {
 			if ($page.url.pathname.includes('/models') && !$user?.permissions?.workspace?.models) {
 				goto('/');
 			} else if (
@@ -84,7 +84,7 @@
 					<div
 						class="flex gap-1 scrollbar-none overflow-x-auto w-fit text-center text-sm font-medium rounded-full bg-transparent py-1 touch-auto pointer-events-auto"
 					>
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.models}
+						{#if $isAdmin || $user?.permissions?.workspace?.models}
 							<a
 								draggable="false"
 								aria-current={$page.url.pathname.includes('/workspace/models') ? 'page' : null}
@@ -95,7 +95,7 @@
 							>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.knowledge}
+						{#if $isAdmin || $user?.permissions?.workspace?.knowledge}
 							<a
 								draggable="false"
 								aria-current={$page.url.pathname.includes('/workspace/knowledge') ? 'page' : null}
@@ -108,7 +108,7 @@
 							</a>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.prompts}
+						{#if $isAdmin || $user?.permissions?.workspace?.prompts}
 							<a
 								draggable="false"
 								aria-current={$page.url.pathname.includes('/workspace/prompts') ? 'page' : null}
@@ -119,7 +119,7 @@
 							>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
+						{#if $isAdmin || $user?.permissions?.workspace?.skills}
 							<a
 								draggable="false"
 								aria-current={$page.url.pathname.includes('/workspace/skills') ? 'page' : null}
@@ -132,7 +132,7 @@
 							</a>
 						{/if}
 
-						{#if $user?.role === 'admin' || $user?.permissions?.workspace?.tools}
+						{#if $isAdmin || $user?.permissions?.workspace?.tools}
 							<a
 								draggable="false"
 								aria-current={$page.url.pathname.includes('/workspace/tools') ? 'page' : null}
@@ -145,7 +145,7 @@
 							</a>
 						{/if}
 
-						{#if $user?.role === 'admin'}
+						{#if $isAdmin}
 							<a
 								draggable="false"
 								aria-current={$page.url.pathname.includes('/workspace/datasources') ? 'page' : null}

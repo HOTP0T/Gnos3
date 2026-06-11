@@ -176,7 +176,7 @@ async def get_tools(request: Request, tool_ids: list[str], user: UserModel, extr
         if tool:
             # Check access control for local tools
             if (
-                not (user.role == 'admin' and BYPASS_ADMIN_ACCESS_CONTROL)
+                not (user.role in ('admin', 'superadmin') and BYPASS_ADMIN_ACCESS_CONTROL)
                 and tool.user_id != user.id
                 and not await AccessGrants.has_access(
                     user_id=user.id,
@@ -416,7 +416,7 @@ async def get_builtin_tools(
     user = extra_params.get('__user__', {})
 
     async def has_user_permission(feature_key: str) -> bool:
-        if user.get('role') == 'admin':
+        if user.get('role') in ('admin', 'superadmin'):
             return True
         return await has_permission(
             user.get('id', ''),

@@ -8,7 +8,7 @@
 	import PinSlash from '$lib/components/icons/PinSlash.svelte';
 	import Link from '$lib/components/icons/Link.svelte';
 	import Pencil from '$lib/components/icons/Pencil.svelte';
-	import { config, settings, user } from '$lib/stores';
+	import { config, settings, user, isAdmin} from '$lib/stores';
 	import GlobeAlt from '$lib/components/icons/GlobeAlt.svelte';
 
 	const i18n = getContext('i18n');
@@ -46,7 +46,7 @@
 		<div
 			class="min-w-[210px] text-sm rounded-2xl p-1 z-[9999999] bg-white dark:bg-gray-850 dark:text-white shadow-lg border border-gray-100 dark:border-gray-800"
 		>
-			{#if model?.preset || model?.info?.base_model_id ? model?.info?.user_id === $user?.id : $user?.role === 'admin'}
+			{#if model?.preset || model?.info?.base_model_id ? model?.info?.user_id === $user?.id : $isAdmin}
 				<button
 					type="button"
 					class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"
@@ -67,7 +67,7 @@
 					<div class="flex items-center">{$i18n.t('Edit')}</div>
 				</button>
 
-				{#if $user?.role === 'admin' && model?.owned_by === 'ollama'}
+				{#if $isAdmin && model?.owned_by === 'ollama'}
 					<button
 						type="button"
 						class="select-none flex rounded-xl py-1.5 px-3 w-full hover:bg-gray-50 dark:hover:bg-gray-800 transition items-center gap-2"

@@ -22,7 +22,12 @@ services:
       - ${OPEN_WEBUI_PORT-3000}:8080
     environment:
       - 'OLLAMA_BASE_URL=http://ollama:11434'
-      - 'WEBUI_SECRET_KEY='
+      # JWT signing key. Read from Gnos3/.env (or host env). MUST match the
+      # value in the root /home/ragstack/Gnos3-K4mi-Nexa/.env so that the
+      # data modules verify the same JWTs Gnos3 issues. If unset, Open WebUI's
+      # start.sh generates a random key on every container start — that
+      # invalidates all sessions on restart and breaks cross-stack RBAC.
+      - 'WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-}'
       # ── RAG retrieval defaults (used on first boot; PersistentConfig stores
       # them in the DB afterwards). Tuned for the modular Gnos3-K4mi stack so a
       # fresh deploy retrieves correctly across CJK + Latin name queries.

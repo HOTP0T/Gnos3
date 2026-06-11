@@ -1,7 +1,7 @@
 <script>
 	import { onMount, getContext } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 
 	import Dashboard from './Analytics/Dashboard.svelte';
 
@@ -10,7 +10,7 @@
 	let loaded = false;
 
 	onMount(async () => {
-		if ($user?.role !== 'admin') {
+		if (!$isAdmin) {
 			await goto('/');
 		}
 		loaded = true;

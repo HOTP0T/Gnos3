@@ -7,7 +7,7 @@
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, knowledge, user } from '$lib/stores';
+	import { WEBUI_NAME, knowledge, user, isAdmin} from '$lib/stores';
 	import {
 		deleteKnowledgeById,
 		searchKnowledgeBases,
@@ -276,11 +276,11 @@
 											{/if}
 										</div>
 
-										{#if item?.write_access || $user?.role === 'admin'}
+										{#if item?.write_access || $isAdmin}
 											<div class="flex items-center gap-2">
 												<div class=" flex self-center">
 													<ItemMenu
-														onExport={$user.role === 'admin'
+														onExport={$isAdmin
 															? () => {
 																	exportHandler(item);
 																}

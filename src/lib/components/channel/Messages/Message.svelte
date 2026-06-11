@@ -15,7 +15,7 @@
 
 	import { formatDate } from '$lib/utils';
 
-	import { settings, user, shortCodesToEmojis } from '$lib/stores';
+	import { settings, user, shortCodesToEmojis, isAdmin} from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import { getMessageData } from '$lib/apis/channels';
 
@@ -265,7 +265,7 @@
 							</Tooltip>
 						{/if}
 
-						{#if message.user_id === $user?.id || $user?.role === 'admin'}
+						{#if message.user_id === $user?.id || $isAdmin}
 							{#if onEdit}
 								<Tooltip content={$i18n.t('Edit')}>
 									<button

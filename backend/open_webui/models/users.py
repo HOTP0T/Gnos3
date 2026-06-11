@@ -13,6 +13,7 @@ from open_webui.utils.validate import validate_profile_image_url
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from sqlalchemy import (
     BigInteger,
+    Integer,
     JSON,
     Column,
     String,
@@ -67,6 +68,13 @@ class User(Base):
     oauth = Column(JSON, nullable=True)
     scim = Column(JSON, nullable=True)
 
+    # Phase 4 RBAC: K4mi (Paperless-NGX) user.id mapping for the SSO bridge.
+    # Populated by the bridge backend on first-sight (resolves Gnos3 user →
+    # K4mi user by email or auto-creates), or by an admin via the Users UI.
+    # NULL means the K4mi user hasn't been resolved yet; the bridge handles
+    # that lazily.
+    k4mi_user_id = Column(Integer, nullable=True, index=True)
+
     last_active_at = Column(BigInteger)
     updated_at = Column(BigInteger)
     created_at = Column(BigInteger)
@@ -99,6 +107,9 @@ class UserModel(BaseModel):
 
     oauth: Optional[dict] = None
     scim: Optional[dict] = None
+
+    # Phase 4: K4mi user.id mapping for the SSO bridge.
+    k4mi_user_id: Optional[int] = None
 
     last_active_at: int  # timestamp in epoch
     updated_at: int  # timestamp in epoch
@@ -795,8 +806,12 @@ class UsersTable:
             return [user.id for user in users]
 
     async def get_super_admin_user(self, db: Optional[AsyncSession] = None) -> Optional[UserModel]:
+        # Phase 3.7 RBAC: the platform-admin tier is now 'superadmin'.
+        # Existing 'admin' users were migrated to 'superadmin' via the
+        # rbac_split migration. The data-admin 'admin' tier is NOT a
+        # platform owner and shouldn't satisfy this lookup.
         async with get_async_db_context(db) as db:
-            result = await db.execute(select(User).filter_by(role='admin').limit(1))
+            result = await db.execute(select(User).filter_by(role='superadmin').limit(1))
             user = result.scalars().first()
             if user:
                 return UserModel.model_validate(user)

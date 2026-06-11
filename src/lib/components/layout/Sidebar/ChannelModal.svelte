@@ -7,7 +7,7 @@
 	import { goto } from '$app/navigation';
 
 	import { createNewChannel, deleteChannelById } from '$lib/apis/channels';
-	import { user } from '$lib/stores';
+	import { user, isAdmin} from '$lib/stores';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Modal from '$lib/components/common/Modal.svelte';
@@ -75,7 +75,7 @@
 	};
 
 	const init = () => {
-		if ($user?.role === 'admin') {
+		if ($isAdmin) {
 			channelTypes = ['', 'group', 'dm'];
 		} else {
 			channelTypes = ['group', 'dm'];

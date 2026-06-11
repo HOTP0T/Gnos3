@@ -20,7 +20,7 @@
 		getChatPinnedStatusById,
 		toggleChatPinnedStatusById
 	} from '$lib/apis/chats';
-	import { chats, folders, settings, theme, user } from '$lib/stores';
+	import { chats, folders, settings, theme, user, isAdmin} from '$lib/stores';
 	import { createMessagesList } from '$lib/utils';
 	import { downloadChatAsPDF } from '$lib/apis/utils';
 	import Download from '$lib/components/icons/Download.svelte';
@@ -295,7 +295,7 @@
 		<div
 			class="select-none min-w-[200px] rounded-2xl px-1 py-1 border border-gray-100 dark:border-gray-800 z-50 bg-white dark:bg-gray-850 dark:text-white shadow-lg transition"
 		>
-			{#if $user?.role === 'admin' || ($user.permissions?.chat?.share ?? true)}
+			{#if $isAdmin || ($user.permissions?.chat?.share ?? true)}
 				<button
 					draggable="false"
 					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"
@@ -320,7 +320,7 @@
 					<div class="flex items-center">{$i18n.t('Download')}</div>
 				</button>
 
-				{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
+				{#if $isAdmin || ($user.permissions?.chat?.export ?? true)}
 					<button
 						draggable="false"
 						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl w-full"

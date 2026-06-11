@@ -416,7 +416,7 @@ async def get_current_user_by_api_key(request, api_key: str):
         )
 
     if not request.state.enable_api_keys or (
-        user.role != 'admin'
+        user.role not in ('admin', 'superadmin')
         and not await has_permission(
             user.id,
             'features.api_keys',
@@ -456,21 +456,86 @@ async def get_current_user_by_api_key(request, api_key: str):
 
 
 def get_verified_user(user=Depends(get_current_user)):
-    if user.role not in {'user', 'admin'}:
+    # Phase 3.7 RBAC: 'superadmin' is the highest tier; both data-admin and
+    # platform-admin roles are valid verified users.
+    if user.role not in {'user', 'admin', 'superadmin'}:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
     return user
+
+
+# ─── RBAC role tiers (Phase 3.7) ─────────────────────────────────────────
+# - 'superadmin' = platform owner. Full access including LDAP/OAuth/RAG/model
+#    providers/functions/etc. Created by promoting users from any tier.
+# - 'admin'      = data administrator. Bypasses all per-module and per-company
+#    data checks BUT cannot manage platform-level config. Can manage groups,
+#    per-company role assignments, and other users at tier <= user.
+# - 'user'       = regular user. Access granted exclusively by group membership.
+# - 'pending'    = signed up but awaiting promotion to 'user' or above.
+# `get_admin_user` is the strict gate: superadmin-only. Reused by every
+# pre-existing /admin/* platform-config endpoint, so its semantics tighten
+# automatically when existing 'admin' users were migrated to 'superadmin'.
+# `get_admin_or_above_user` is the looser gate: admin OR superadmin. Used by
+# user-mgmt, group-mgmt, and the per-company permissions UI endpoints.
+ADMIN_TIER_ROLES: set[str] = {'admin', 'superadmin'}
 
 
 def get_admin_user(user=Depends(get_current_user)):
-    if user.role != 'admin':
+    if user.role != 'superadmin':
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
     return user
+
+
+def get_admin_or_above_user(user=Depends(get_current_user)):
+    """Accepts either 'admin' or 'superadmin'. Used by endpoints that grant
+    data-admin capability without requiring platform-admin (user/group CRUD,
+    per-company role assignment endpoints, etc.)."""
+    if user.role not in ADMIN_TIER_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
+        )
+    return user
+
+
+# ─── K4mi SSO bridge (Phase 4) ──────────────────────────────────────────
+# Short-lived "exchange" JWT that K4mi's paperless.gnos_jwt_auth verifies
+# against the same WEBUI_SECRET_KEY. Distinct from the session JWT in two
+# ways: (a) claim shape matches what K4mi's _verify_jwt requires
+# ({sub, email, role, name, groups, iss='gnos3', mfa_verified}), and
+# (b) it's intentionally short-lived so a leaked URL ages out fast.
+K4MI_EXCHANGE_TOKEN_TTL = timedelta(minutes=5)
+
+
+def create_k4mi_exchange_token(
+    user,
+    groups: Optional[List[str]] = None,
+    mfa_verified: bool = False,
+) -> tuple[str, int]:
+    """Mint a 5-minute Gnos3-issued JWT for the K4mi SSO bridge.
+
+    Returns (encoded_token, expires_at_epoch_seconds).
+    """
+    now = datetime.now(UTC)
+    expires_at_dt = now + K4MI_EXCHANGE_TOKEN_TTL
+    payload = {
+        'sub': user.id,
+        'email': user.email or '',
+        'role': user.role,
+        'name': user.name or '',
+        'groups': [g for g in (groups or []) if g],
+        'iss': 'gnos3',
+        'mfa_verified': bool(mfa_verified),
+        'iat': now,
+        'exp': expires_at_dt,
+    }
+    token = jwt.encode(payload, SESSION_SECRET, algorithm=ALGORITHM)
+    return token, int(expires_at_dt.timestamp())
 
 
 async def create_admin_user(email: str, password: str, name: str = 'Admin'):
@@ -490,11 +555,12 @@ async def create_admin_user(email: str, password: str, name: str = 'Admin'):
     log.info(f'Creating admin account from environment variables: {email}')
     try:
         hashed = get_password_hash(password)
+        # Phase 3.7 RBAC: env-bootstrap admin is the platform owner → superadmin.
         user = await Auths.insert_new_auth(
             email=email.lower(),
             password=hashed,
             name=name,
-            role='admin',
+            role='superadmin',
         )
         if user:
             log.info(f'Admin account created successfully: {email}')

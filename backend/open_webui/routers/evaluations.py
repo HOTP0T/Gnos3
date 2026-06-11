@@ -385,7 +385,7 @@ async def create_feedback(
 
 @router.get('/feedback/{id}', response_model=FeedbackModel)
 async def get_feedback_by_id(id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)):
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         feedback = await Feedbacks.get_feedback_by_id(id=id, db=db)
     else:
         feedback = await Feedbacks.get_feedback_by_id_and_user_id(id=id, user_id=user.id, db=db)
@@ -403,7 +403,7 @@ async def update_feedback_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         feedback = await Feedbacks.update_feedback_by_id(id=id, form_data=form_data, db=db)
     else:
         feedback = await Feedbacks.update_feedback_by_id_and_user_id(id=id, user_id=user.id, form_data=form_data, db=db)
@@ -418,7 +418,7 @@ async def update_feedback_by_id(
 async def delete_feedback_by_id(
     id: str, user=Depends(get_verified_user), db: AsyncSession = Depends(get_async_session)
 ):
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         success = await Feedbacks.delete_feedback_by_id(id=id, db=db)
     else:
         success = await Feedbacks.delete_feedback_by_id_and_user_id(id=id, user_id=user.id, db=db)

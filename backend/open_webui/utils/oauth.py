@@ -1232,8 +1232,14 @@ class OAuthManager:
                         break
                 for admin_role in oauth_admin_roles:
                     if admin_role in oauth_roles:
-                        log.debug('Assigned user the admin role')
-                        role = 'admin'
+                        # Phase 3.7 RBAC: OAUTH_ADMIN_ROLES maps to the
+                        # platform-owner tier ('superadmin'). Preserves
+                        # pre-3.7 semantics where an OAuth admin claim meant
+                        # full platform admin. If you need to grant only the
+                        # data-admin tier via SSO, demote individuals via the
+                        # Users page after first login.
+                        log.debug('Assigned user the superadmin role')
+                        role = 'superadmin'
                         matched = True
                         break
                 if not matched:

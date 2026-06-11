@@ -1071,7 +1071,7 @@ async def filter_accessible_collections(
                           such KB exists, the name is treated as an
                           ephemeral/legacy collection and allowed
     """
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         return collection_names
 
     validated = set()
@@ -1162,7 +1162,7 @@ async def get_sources_from_items(
             note = await Notes.get_note_by_id(item.get('id'))
 
             if note and (
-                user.role == 'admin'
+                user.role in ('admin', 'superadmin')
                 or note.user_id == user.id
                 or await AccessGrants.has_access(
                     user_id=user.id,
@@ -1181,7 +1181,7 @@ async def get_sources_from_items(
             # Chat Attached
             chat = await Chats.get_chat_by_id(item.get('id'))
 
-            if chat and (user.role == 'admin' or chat.user_id == user.id):
+            if chat and (user.role in ('admin', 'superadmin') or chat.user_id == user.id):
                 messages_map = chat.chat.get('history', {}).get('messages', {})
                 message_id = chat.chat.get('history', {}).get('currentId')
 
@@ -1225,7 +1225,7 @@ async def get_sources_from_items(
                 elif item.get('id'):
                     file_object = await Files.get_file_by_id(item.get('id'))
                     if file_object and (
-                        user.role == 'admin'
+                        user.role in ('admin', 'superadmin')
                         or file_object.user_id == user.id
                         or await has_access_to_file(item.get('id'), 'read', user)
                     ):
@@ -1253,7 +1253,7 @@ async def get_sources_from_items(
             knowledge_base = await Knowledges.get_knowledge_by_id(item.get('id'))
 
             if knowledge_base and (
-                user.role == 'admin'
+                user.role in ('admin', 'superadmin')
                 or knowledge_base.user_id == user.id
                 or await AccessGrants.has_access(
                     user_id=user.id,
@@ -1264,7 +1264,7 @@ async def get_sources_from_items(
             ):
                 if item.get('context') == 'full' or request.app.state.config.BYPASS_EMBEDDING_AND_RETRIEVAL:
                     if knowledge_base and (
-                        user.role == 'admin'
+                        user.role in ('admin', 'superadmin')
                         or knowledge_base.user_id == user.id
                         or await AccessGrants.has_access(
                             user_id=user.id,

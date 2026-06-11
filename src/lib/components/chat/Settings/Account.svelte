@@ -2,7 +2,7 @@
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
 
-	import { user, config, settings } from '$lib/stores';
+	import { user, config, settings, isAdmin} from '$lib/stores';
 	import { updateUserProfile, createAPIKey, getAPIKey, getSessionUser } from '$lib/apis/auths';
 	import { WEBUI_BASE_URL } from '$lib/constants';
 
@@ -112,7 +112,7 @@
 		if (
 			user &&
 			($config?.features?.enable_api_keys ?? true) &&
-			(user?.role === 'admin' || (user?.permissions?.features?.api_keys ?? false))
+			(user?.role === 'admin' || user?.role === 'superadmin' || (user?.permissions?.features?.api_keys ?? false))
 		) {
 			APIKey = await getAPIKey(localStorage.token).catch((error) => {
 				console.log(error);
@@ -254,7 +254,7 @@
 			</div>
 		{/if}
 
-		{#if ($config?.features?.enable_api_keys ?? true) && ($user?.role === 'admin' || ($user?.permissions?.features?.api_keys ?? false))}
+		{#if ($config?.features?.enable_api_keys ?? true) && ($isAdmin || ($user?.permissions?.features?.api_keys ?? false))}
 			<div class="flex justify-between items-center text-sm mt-2">
 				<div class="  font-medium">{$i18n.t('API keys')}</div>
 				<button
@@ -268,7 +268,7 @@
 
 			{#if showAPIKeys}
 				<div class="flex flex-col">
-					{#if $user?.role === 'admin'}
+					{#if $isAdmin}
 						<div class="justify-between w-full mt-2">
 							<div class="flex justify-between w-full">
 								<div class="self-center text-xs font-medium mb-1">{$i18n.t('JWT Token')}</div>
@@ -325,9 +325,9 @@
 						</div>
 					{/if}
 
-					{#if ($config?.features?.enable_api_keys ?? true) && ($user?.role === 'admin' || ($user?.permissions?.features?.api_keys ?? false))}
+					{#if ($config?.features?.enable_api_keys ?? true) && ($isAdmin || ($user?.permissions?.features?.api_keys ?? false))}
 						<div class="justify-between w-full mt-2">
-							{#if $user?.role === 'admin'}
+							{#if $isAdmin}
 								<div class="flex justify-between w-full">
 									<div class="self-center text-xs font-medium mb-1">{$i18n.t('API Key')}</div>
 								</div>

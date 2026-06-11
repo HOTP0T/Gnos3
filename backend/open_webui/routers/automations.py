@@ -44,7 +44,7 @@ async def check_automations_permission(request, user):
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.automations', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(
@@ -59,7 +59,7 @@ def check_automation_access(automation, user):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
-    if user.role != 'admin' and user.id != automation.user_id:
+    if user.role not in ('admin', 'superadmin') and user.id != automation.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
@@ -68,7 +68,7 @@ def check_automation_access(automation, user):
 
 async def check_automation_limits(request, user, rrule_str: str, db, is_create: bool = False):
     """Enforce global automation limits. Admins bypass all checks."""
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         return
 
     # Max count (create only)

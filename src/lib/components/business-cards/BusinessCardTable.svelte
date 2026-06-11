@@ -11,8 +11,8 @@
 		syncBusinessCardFromK4mi,
 		type BusinessCard
 	} from '$lib/apis/business-cards';
-	import { K4MI_BASE_URL } from '$lib/constants';
 
+	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
@@ -195,9 +195,6 @@
 			syncingIds = new Set(syncingIds);
 		}
 	};
-
-	const k4miHref = (id: number | null) =>
-		id ? `${K4MI_BASE_URL}/documents/${id}/details` : '#';
 
 	const openCard = (card: BusinessCard) => {
 		selectedCard = card;
@@ -610,13 +607,11 @@
 								>
 									{#if card.k4mi_document_id}
 										<Tooltip content={$i18n.t('Open in K4mi')}>
-											<a
-												class="hover:text-gray-700 dark:hover:text-gray-200 transition p-1 -m-1"
-												href={k4miHref(card.k4mi_document_id)}
-												target="_blank"
-												rel="noopener noreferrer"
-												aria-label={$i18n.t('Open in K4mi')}
-												on:click|stopPropagation
+											<K4miDocLink
+												docId={card.k4mi_document_id}
+												extraClass="hover:text-gray-700 dark:hover:text-gray-200 transition p-1 -m-1"
+												title={$i18n.t('Open in K4mi')}
+												stopPropagation
 											>
 												<svg
 													xmlns="http://www.w3.org/2000/svg"
@@ -631,7 +626,7 @@
 														points="15 3 21 3 21 9"
 													/><line x1="10" y1="14" x2="21" y2="3" /></svg
 												>
-											</a>
+											</K4miDocLink>
 										</Tooltip>
 										<Tooltip content={$i18n.t('Sync notes & metadata from K4mi')}>
 											<button

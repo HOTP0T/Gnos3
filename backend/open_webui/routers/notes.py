@@ -71,7 +71,7 @@ async def get_notes(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -116,7 +116,7 @@ async def get_pinned_notes(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -156,7 +156,7 @@ async def search_notes(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -182,7 +182,7 @@ async def search_notes(
     if direction:
         filter['direction'] = direction
 
-    if not user.role == 'admin' or not BYPASS_ADMIN_ACCESS_CONTROL:
+    if not user.role in ('admin', 'superadmin') or not BYPASS_ADMIN_ACCESS_CONTROL:
         groups = await Groups.get_groups_by_member_id(user.id, db=db)
         if groups:
             filter['group_ids'] = [group.id for group in groups]
@@ -207,7 +207,7 @@ async def create_new_note(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -248,7 +248,7 @@ async def get_note_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -260,7 +260,7 @@ async def get_note_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if user.role not in ('admin', 'superadmin') and (
         user.id != note.user_id
         and (
             not await AccessGrants.has_access(
@@ -275,7 +275,7 @@ async def get_note_by_id(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=ERROR_MESSAGES.DEFAULT())
 
     write_access = (
-        user.role == 'admin'
+        user.role in ('admin', 'superadmin')
         or (user.id == note.user_id)
         or await AccessGrants.has_access(
             user_id=user.id,
@@ -303,7 +303,7 @@ async def update_note_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -315,7 +315,7 @@ async def update_note_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if user.role not in ('admin', 'superadmin') and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -367,7 +367,7 @@ async def update_note_access_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -379,7 +379,7 @@ async def update_note_access_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if user.role not in ('admin', 'superadmin') and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -416,7 +416,7 @@ async def pin_note_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -428,7 +428,7 @@ async def pin_note_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if user.role not in ('admin', 'superadmin') and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -456,7 +456,7 @@ async def delete_note_by_id(
     user=Depends(get_verified_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.notes', request.app.state.config.USER_PERMISSIONS, db=db
     ):
         raise HTTPException(
@@ -468,7 +468,7 @@ async def delete_note_by_id(
     if not note:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERROR_MESSAGES.NOT_FOUND)
 
-    if user.role != 'admin' and (
+    if user.role not in ('admin', 'superadmin') and (
         user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,

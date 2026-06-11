@@ -56,7 +56,7 @@ async def get_folders(
             detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
         )
 
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id,
         'features.folders',
         request.app.state.config.USER_PERMISSIONS,
@@ -289,7 +289,7 @@ async def delete_folder_by_id(
         chat_delete_permission = await has_permission(
             user.id, 'chat.delete', request.app.state.config.USER_PERMISSIONS, db=db
         )
-        if user.role != 'admin' and not chat_delete_permission:
+        if user.role not in ('admin', 'superadmin') and not chat_delete_permission:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=ERROR_MESSAGES.ACCESS_PROHIBITED,

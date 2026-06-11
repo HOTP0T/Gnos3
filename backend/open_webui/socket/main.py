@@ -399,7 +399,7 @@ async def user_join(sid, data):
     await sio.enter_room(sid, f'user:{user.id}')
 
     # Join all the channels only if user has channels permission
-    if user.role == 'admin' or await has_permission(user.id, 'features.channels'):
+    if user.role in ('admin', 'superadmin') or await has_permission(user.id, 'features.channels'):
         channels = await Channels.get_channels_by_user_id(user.id)
         log.debug(f'{channels=}')
         for channel in channels:
@@ -431,7 +431,7 @@ async def join_channel(sid, data):
         return
 
     # Join all the channels only if user has channels permission
-    if user.role == 'admin' or await has_permission(user.id, 'features.channels'):
+    if user.role in ('admin', 'superadmin') or await has_permission(user.id, 'features.channels'):
         channels = await Channels.get_channels_by_user_id(user.id)
         log.debug(f'{channels=}')
         for channel in channels:
@@ -458,7 +458,7 @@ async def join_note(sid, data):
         return
 
     if (
-        user.role != 'admin'
+        user.role not in ('admin', 'superadmin')
         and user.id != note.user_id
         and not await AccessGrants.has_access(
             user_id=user.id,
@@ -553,7 +553,7 @@ async def ydoc_document_join(sid, data):
                 return
 
             if (
-                user.get('role') != 'admin'
+                user.get('role') not in ('admin', 'superadmin')
                 and user.get('id') != note.user_id
                 and not await AccessGrants.has_access(
                     user_id=user.get('id'),
@@ -626,7 +626,7 @@ async def document_save_handler(document_id, data, user):
             return
 
         if (
-            user.get('role') != 'admin'
+            user.get('role') not in ('admin', 'superadmin')
             and user.get('id') != note.user_id
             and not await AccessGrants.has_access(
                 user_id=user.get('id'),
@@ -710,7 +710,7 @@ async def yjs_document_update(sid, data):
                 return
 
             if (
-                user.get('role') != 'admin'
+                user.get('role') not in ('admin', 'superadmin')
                 and user.get('id') != note.user_id
                 and not await AccessGrants.has_access(
                     user_id=user.get('id'),

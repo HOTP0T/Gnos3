@@ -18,8 +18,8 @@
 		settings,
 		folders,
 		showEmbeds,
-		artifactContents
-	} from '$lib/stores';
+		artifactContents,
+		isAdmin} from '$lib/stores';
 
 	import { getChatById } from '$lib/apis/chats';
 
@@ -327,7 +327,7 @@
 				<hr class="border-gray-50/30 dark:border-gray-800/30 my-1" />
 			{/if}
 
-			{#if !$temporaryChatEnabled && ($user?.role === 'admin' || ($user.permissions?.chat?.share ?? true))}
+			{#if !$temporaryChatEnabled && ($isAdmin || ($user.permissions?.chat?.share ?? true))}
 				<button
 					draggable="false"
 					class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"
@@ -351,7 +351,7 @@
 
 					<div class="flex items-center">{$i18n.t('Download')}</div>
 				</button>
-				{#if $user?.role === 'admin' || ($user.permissions?.chat?.export ?? true)}
+				{#if $isAdmin || ($user.permissions?.chat?.export ?? true)}
 					<button
 						draggable="false"
 						class="flex gap-2 items-center px-3 py-1.5 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl select-none w-full"

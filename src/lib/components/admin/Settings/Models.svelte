@@ -6,7 +6,7 @@
 	import { onMount, getContext, tick } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, config, mobile, models as _models, settings, user } from '$lib/stores';
+	import { WEBUI_NAME, config, mobile, models as _models, settings, user, isAdmin} from '$lib/stores';
 	import {
 		createNewModel,
 		deleteAllModels,
@@ -378,7 +378,7 @@
 				</div>
 
 				<div class="flex w-full justify-end gap-1.5">
-					{#if $user?.role === 'admin'}
+					{#if $isAdmin}
 						<input
 							id="models-import-input"
 							bind:this={modelsImportInputElement}

@@ -9,7 +9,7 @@
 	import FileItem from '$lib/components/common/FileItem.svelte';
 	import Collapsible from '$lib/components/common/Collapsible.svelte';
 
-	import { user, settings } from '$lib/stores';
+	import { user, settings, isAdmin} from '$lib/stores';
 	export let models = [];
 	export let chatFiles = [];
 	export let params = {};
@@ -46,7 +46,7 @@
 		</div>
 	{/if}
 
-	{#if $user?.role === 'admin' || ($user?.permissions.chat?.controls ?? true)}
+	{#if $isAdmin || ($user?.permissions.chat?.controls ?? true)}
 		<div class=" dark:text-gray-200 text-sm py-0.5 px-0.5">
 			{#if chatFiles.length > 0}
 				<Collapsible
@@ -84,7 +84,7 @@
 				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
-			{#if $user?.role === 'admin' || ($user?.permissions.chat?.valves ?? true)}
+			{#if $isAdmin || ($user?.permissions.chat?.valves ?? true)}
 				<Collapsible
 					bind:open={showValves}
 					onChange={setOpen('valves')}
@@ -99,7 +99,7 @@
 				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
-			{#if $user?.role === 'admin' || ($user?.permissions.chat?.system_prompt ?? true)}
+			{#if $isAdmin || ($user?.permissions.chat?.system_prompt ?? true)}
 				<Collapsible
 					title={$i18n.t('System Prompt')}
 					bind:open={showSystemPrompt}
@@ -121,7 +121,7 @@
 				<hr class="my-2 border-gray-50 dark:border-gray-700/10" />
 			{/if}
 
-			{#if $user?.role === 'admin' || ($user?.permissions.chat?.params ?? true)}
+			{#if $isAdmin || ($user?.permissions.chat?.params ?? true)}
 				<Collapsible
 					title={$i18n.t('Advanced Params')}
 					bind:open={showAdvancedParams}
@@ -130,7 +130,7 @@
 				>
 					<div class="text-sm mt-1.5" slot="content">
 						<div>
-							<AdvancedParams admin={$user?.role === 'admin'} custom={true} bind:params />
+							<AdvancedParams admin={$isAdmin} custom={true} bind:params />
 						</div>
 					</div>
 				</Collapsible>

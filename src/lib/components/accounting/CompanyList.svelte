@@ -15,8 +15,15 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import CompanyFormModal from '$lib/components/accounting/CompanyFormModal.svelte';
+	import { user, isAdmin} from '$lib/stores';
 
 	const i18n = getContext('i18n');
+
+	// RBAC: Add Company creates a new company → requires modules.accounting.admin
+	// (the user must have global admin on the accounting module). Admins bypass.
+	$: canCreateCompany =
+		$isAdmin ||
+		Boolean($user?.permissions?.modules?.accounting?.admin);
 
 	let loading = true;
 	let companies: any[] = [];
@@ -197,13 +204,15 @@
 					/>
 				</div>
 
-				<!-- Add Company Button -->
-				<button
-					class="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition whitespace-nowrap"
-					on:click={handleAddCompany}
-				>
-					{$i18n.t('Add Company')}
-				</button>
+				<!-- Add Company Button (admin-only) -->
+				{#if canCreateCompany}
+					<button
+						class="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition whitespace-nowrap"
+						on:click={handleAddCompany}
+					>
+						{$i18n.t('Add Company')}
+					</button>
+				{/if}
 			</div>
 		</div>
 

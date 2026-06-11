@@ -5,7 +5,7 @@
 	import { onMount, tick, getContext } from 'svelte';
 
 	import { WEBUI_BASE_URL } from '$lib/constants';
-	import { WEBUI_NAME, config, user, models, settings, showSidebar } from '$lib/stores';
+	import { WEBUI_NAME, config, user, models, settings, showSidebar, isAdmin} from '$lib/stores';
 	import { chatCompletion } from '$lib/apis/openai';
 
 	import { splitStream } from '$lib/utils';
@@ -104,7 +104,7 @@
 	};
 
 	onMount(async () => {
-		if ($user?.role !== 'admin') {
+		if (!$isAdmin) {
 			await goto('/');
 		}
 

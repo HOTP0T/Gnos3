@@ -6,7 +6,7 @@
 	import { onMount, getContext, tick, onDestroy } from 'svelte';
 	const i18n = getContext('i18n');
 
-	import { WEBUI_NAME, user, skills as _skills } from '$lib/stores';
+	import { WEBUI_NAME, user, skills as _skills, isAdmin} from '$lib/stores';
 	import { goto } from '$app/navigation';
 	import {
 		getSkills,
@@ -261,7 +261,7 @@
 					}}
 				/>
 
-				{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
+				{#if $isAdmin || $user?.permissions?.workspace?.skills}
 					<button
 						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
 						on:click={() => {
@@ -274,7 +274,7 @@
 					</button>
 				{/if}
 
-				{#if total && ($user?.role === 'admin' || $user?.permissions?.workspace?.skills)}
+				{#if total && ($isAdmin || $user?.permissions?.workspace?.skills)}
 					<button
 						class="flex text-xs items-center space-x-1 px-3 py-1.5 rounded-xl bg-gray-50 hover:bg-gray-100 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-gray-200 transition"
 						on:click={async () => {
@@ -296,7 +296,7 @@
 					</button>
 				{/if}
 
-				{#if $user?.role === 'admin' || $user?.permissions?.workspace?.skills}
+				{#if $isAdmin || $user?.permissions?.workspace?.skills}
 					<a
 						class=" px-2 py-1.5 rounded-xl bg-black text-white dark:bg-white dark:text-black transition font-medium text-sm flex items-center"
 						href="/workspace/skills/create"

@@ -330,7 +330,7 @@ async def speech(request: Request, user=Depends(get_verified_user)):
             detail=ERROR_MESSAGES.NOT_FOUND,
         )
 
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'chat.tts', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(
@@ -1224,7 +1224,7 @@ async def transcription(
     language: Optional[str] = Form(None),
     user=Depends(get_verified_user),
 ):
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'chat.stt', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(

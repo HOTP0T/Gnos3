@@ -40,7 +40,7 @@ async def check_calendar_permission(request: Request, user):
             status_code=status.HTTP_403_FORBIDDEN,
             detail=ERROR_MESSAGES.UNAUTHORIZED,
         )
-    if user.role != 'admin' and not await has_permission(
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
         user.id, 'features.calendar', request.app.state.config.USER_PERMISSIONS
     ):
         raise HTTPException(
@@ -53,7 +53,7 @@ async def _user_has_automations(request: Request, user) -> bool:
     """Check if automations feature is available to this user."""
     if not getattr(request.app.state.config, 'ENABLE_AUTOMATIONS', False):
         return False
-    if user.role == 'admin':
+    if user.role in ('admin', 'superadmin'):
         return True
     return await has_permission(user.id, 'features.automations', request.app.state.config.USER_PERMISSIONS)
 
@@ -63,7 +63,7 @@ async def _check_calendar_access(calendar_id: str, user: UserModel, permission: 
     cal = await Calendars.get_calendar_by_id(calendar_id)
     if not cal:
         raise HTTPException(status_code=404, detail='Calendar not found')
-    if cal.user_id == user.id or user.role == 'admin':
+    if cal.user_id == user.id or user.role in ('admin', 'superadmin'):
         return cal
     user_groups = await Groups.get_groups_by_member_id(user.id)
     user_group_ids = [g.id for g in user_groups]
@@ -347,7 +347,7 @@ async def update_calendar(
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can change access grants
-    if form_data.access_grants is not None and cal.user_id != user.id and user.role != 'admin':
+    if form_data.access_grants is not None and cal.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=403, detail='Only owner can manage sharing')
 
     updated = await Calendars.update_calendar_by_id(calendar_id, form_data)
@@ -367,7 +367,7 @@ async def delete_calendar(request: Request, calendar_id: str, user: UserModel = 
     cal = await _check_calendar_access(calendar_id, user, 'write')
 
     # Only owner/admin can delete
-    if cal.user_id != user.id and user.role != 'admin':
+    if cal.user_id != user.id and user.role not in ('admin', 'superadmin'):
         raise HTTPException(status_code=403, detail='Only owner can delete calendar')
 
     # Block deletion of default calendar
