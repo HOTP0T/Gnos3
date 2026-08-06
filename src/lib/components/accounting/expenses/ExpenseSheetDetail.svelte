@@ -8,14 +8,14 @@
 		deleteExpenseSheet,
 		transitionExpenseSheet,
 		getExpenseSheetCandidates,
-		expenseSheetPdfUrl,
-		expenseSheetExcelUrl
+		downloadExpenseSheetPdf,
+		downloadExpenseSheetExcel
 	} from '$lib/apis/accounting';
 	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ExpenseSheetStatusBadge from './ExpenseSheetStatusBadge.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 
 	export let companyId: number;
 	export let sheetId: number;
@@ -29,6 +29,16 @@
 	let userInfo = '';
 	let rejectionReason = '';
 	let transitionTarget = '';
+	let transitioning = false;
+
+	const exportSheet = async (kind: 'pdf' | 'excel') => {
+		try {
+			if (kind === 'pdf') await downloadExpenseSheetPdf(sheetId);
+			else await downloadExpenseSheetExcel(sheetId);
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
+		}
+	};
 
 	const load = async () => {
 		loading = true;
@@ -104,6 +114,8 @@
 	};
 
 	const confirmTransition = async () => {
+		if (transitioning) return; // guard against double-submit (double-click)
+		transitioning = true;
 		try {
 			sheet = await transitionExpenseSheet(sheetId, {
 				target: transitionTarget as any,
@@ -116,6 +128,8 @@
 			transitionTarget = '';
 		} catch (err: any) {
 			toast.error(err?.detail ?? `${err}`);
+		} finally {
+			transitioning = false;
 		}
 	};
 
@@ -141,6 +155,24 @@
 
 	// SSO bridge handles the URL; we just need to know whether a doc id exists.
 	const hasK4miDoc = (id: number | null | undefined) => !!id;
+
+	// Collapsible journal-entry drill-down: each category = one debit line;
+	// expand it to see the individual receipts/items that rolled into it.
+	let expandedCats = new Set<number | null>();
+	const toggleCat = (id: number | null) => {
+		const next = new Set(expandedCats);
+		next.has(id) ? next.delete(id) : next.add(id);
+		expandedCats = next;
+	};
+	$: linesByCat = (() => {
+		const m = new Map<number | null, any[]>();
+		for (const l of sheet?.lines ?? []) {
+			const k = (l.category_id ?? null) as number | null;
+			if (!m.has(k)) m.set(k, []);
+			(m.get(k) as any[]).push(l);
+		}
+		return m;
+	})();
 </script>
 
 {#if loading}
@@ -171,22 +203,18 @@
 				{/if}
 			</div>
 			<div class="flex items-center gap-2 flex-wrap">
-				<a
-					href={expenseSheetPdfUrl(sheet.id)}
-					target="_blank"
-					rel="noopener"
+				<button
+					on:click={() => exportSheet('pdf')}
 					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
 				>
 					{$i18n.t('PDF')}
-				</a>
-				<a
-					href={expenseSheetExcelUrl(sheet.id)}
-					target="_blank"
-					rel="noopener"
+				</button>
+				<button
+					on:click={() => exportSheet('excel')}
 					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
 				>
 					{$i18n.t('Excel')}
-				</a>
+				</button>
 
 				{#if sheet.status === 'draft'}
 					<button
@@ -305,38 +333,97 @@
 			{/if}
 		</div>
 
-		<!-- Category totals -->
+		<!-- Reimbursement journal entry (collapsible: expand a debit line to its receipts) -->
 		{#if sheet.category_totals?.length}
 			<div class="rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
+				<div
+					class="px-3 py-2 text-sm font-semibold bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between"
+				>
+					<span>{$i18n.t('Reimbursement journal entry')}</span>
+					<span class="text-xs font-normal text-gray-500">
+						{#if sheet.transaction_entry_number}
+							<span class="font-mono">{sheet.transaction_entry_number}</span> · {$i18n.t('posted')}
+						{:else if sheet.transaction_id}
+							{$i18n.t('draft — posts when the sheet is paid')}
+						{:else}
+							{$i18n.t('builds when the sheet is approved')}
+						{/if}
+					</span>
+				</div>
 				<table class="w-full text-sm">
 					<thead class="text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-850">
 						<tr>
-							<th class="text-left py-2 px-3">{$i18n.t('Category')}</th>
-							<th class="text-center py-2 px-3">{$i18n.t('Count')}</th>
-							<th class="text-right py-2 px-3">{$i18n.t('Subtotal')}</th>
-							<th class="text-right py-2 px-3">{$i18n.t('Tax')}</th>
-							<th class="text-right py-2 px-3">{$i18n.t('Total')}</th>
+							<th class="text-left py-2 px-3">{$i18n.t('Account / Category')}</th>
+							<th class="text-center py-2 px-3">{$i18n.t('Items')}</th>
+							<th class="text-right py-2 px-3">{$i18n.t('Debit')}</th>
+							<th class="text-right py-2 px-3">{$i18n.t('Credit')}</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each sheet.category_totals as g}
-							<tr class="border-t border-gray-100 dark:border-gray-850">
-								<td class="py-2 px-3 dark:text-gray-200">{g.category_label}</td>
+							{@const catId = g.category_id ?? null}
+							{@const open = expandedCats.has(catId)}
+							<tr
+								class="border-t border-gray-100 dark:border-gray-850 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/50"
+								on:click={() => toggleCat(catId)}
+							>
+								<td class="py-2 px-3 dark:text-gray-200">
+									<span class="inline-block w-4 text-gray-400">{open ? '▾' : '▸'}</span>
+									{g.category_label}
+									{#if g.tax_amount && Number(g.tax_amount) > 0}
+										<span class="text-xs text-gray-400"
+											>({money(g.subtotal, sheet.currency)} + {money(
+												g.tax_amount,
+												sheet.currency
+											)} tax)</span
+										>
+									{/if}
+								</td>
 								<td class="py-2 px-3 text-center text-gray-500">{g.count}</td>
-								<td class="py-2 px-3 text-right">{money(g.subtotal, sheet.currency)}</td>
-								<td class="py-2 px-3 text-right">{money(g.tax_amount, sheet.currency)}</td>
-								<td class="py-2 px-3 text-right font-medium"
-									>{money(g.total_amount, sheet.currency)}</td
-								>
+								<td class="py-2 px-3 text-right font-medium">{money(g.total_amount, sheet.currency)}</td>
+								<td class="py-2 px-3 text-right text-gray-400">—</td>
 							</tr>
+							{#if open}
+								{#each linesByCat.get(catId) ?? [] as l}
+									<tr class="bg-gray-50/60 dark:bg-gray-900/30 text-xs">
+										<td class="py-1.5 pl-10 pr-3 text-gray-600 dark:text-gray-400">
+											<span class="text-gray-400">{l.invoice_date ?? '—'}</span>
+											· {l.vendor_name ?? ''}
+											{#if l.description}<span class="text-gray-400"> — {l.description}</span>{/if}
+											{#if l.has_receipt}<span class="ml-1" title="Has receipt">📎</span>{/if}
+											{#if hasK4miDoc(l.k4mi_document_id)}
+												<K4miDocLink docId={l.k4mi_document_id} extraClass="ml-1 text-blue-600 hover:text-blue-700">#{l.k4mi_document_id}</K4miDocLink>
+											{/if}
+										</td>
+										<td></td>
+										<td class="py-1.5 px-3 text-right text-gray-600 dark:text-gray-400">
+											{#if l.converted_total != null}
+												{money(l.converted_total, sheet.currency)}
+												<span class="text-gray-400">({money(l.total_amount, l.currency)})</span>
+											{:else}
+												{money(l.total_amount, l.currency)}
+											{/if}
+										</td>
+										<td></td>
+									</tr>
+								{/each}
+							{/if}
 						{/each}
+						<!-- Credit line: owed to the employee -->
+						<tr class="border-t border-gray-200 dark:border-gray-800">
+							<td class="py-2 px-3 dark:text-gray-200"
+								>{$i18n.t('Due to')} {sheet.employee_name ?? `#${sheet.employee_id}`}</td
+							>
+							<td></td>
+							<td class="py-2 px-3 text-right text-gray-400">—</td>
+							<td class="py-2 px-3 text-right font-medium">{money(sheet.total_amount, sheet.currency)}</td>
+						</tr>
 					</tbody>
 					<tfoot class="bg-gray-50 dark:bg-gray-850 font-semibold">
 						<tr class="border-t border-gray-200 dark:border-gray-800">
-							<td class="py-2 px-3 dark:text-gray-200">{$i18n.t('Grand Total')}</td>
+							<td class="py-2 px-3 dark:text-gray-200">{$i18n.t('Total')}</td>
 							<td></td>
-							<td class="py-2 px-3 text-right">{money(sheet.subtotal, sheet.currency)}</td>
-							<td class="py-2 px-3 text-right">{money(sheet.tax_amount, sheet.currency)}</td>
+							<td class="py-2 px-3 text-right">{money(sheet.total_amount, sheet.currency)}</td>
 							<td class="py-2 px-3 text-right">{money(sheet.total_amount, sheet.currency)}</td>
 						</tr>
 					</tfoot>
@@ -392,7 +479,7 @@
 									{/if}
 								</td>
 								<td class="py-2 px-3 text-right">
-									{#if sheet.status === 'draft'}
+									{#if sheet.status === 'draft' && l.invoice_id}
 										<button
 											class="text-xs text-red-500 hover:text-red-700"
 											on:click={() => removeLine(l.invoice_id)}>×</button
@@ -558,10 +645,11 @@
 						on:click={() => (transitionTarget = '')}>{$i18n.t('Cancel')}</button
 					>
 					<button
-						class="px-4 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+						class="px-4 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-60"
+						disabled={transitioning}
 						on:click={confirmTransition}
 					>
-						{$i18n.t('Confirm')}
+						{transitioning ? $i18n.t('Working...') : $i18n.t('Confirm')}
 					</button>
 				</div>
 			</div>

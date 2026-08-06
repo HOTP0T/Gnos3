@@ -34,6 +34,7 @@ from open_webui.internal.db import get_async_session
 
 
 from open_webui.utils.auth import (
+    VALID_USER_ROLES,
     get_admin_or_above_user,
     get_admin_user,
     get_password_hash,
@@ -533,6 +534,15 @@ async def update_user_by_id(
     session_user=Depends(get_admin_or_above_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    # Reject unknown role values up front. Tier checks compare exact lowercase
+    # strings, so a typo/casing (e.g. "Admin") would persist and silently deny
+    # all access instead of granting the intended tier.
+    if form_data.role is not None and form_data.role not in VALID_USER_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid role: {form_data.role!r}",
+        )
+
     # Prevent modification of the primary superadmin user by anyone but themselves
     try:
         first_user = await Users.get_first_user(db=db)

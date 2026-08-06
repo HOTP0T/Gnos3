@@ -7,7 +7,8 @@
 		getEmployees,
 		generateExpenseSheet,
 		getExpenseSheetCandidates,
-		getPendingReimbursableInvoices
+		getPendingReimbursableInvoices,
+		downloadExpenseSheetsPdf
 	} from '$lib/apis/accounting';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ExpenseSheetStatusBadge from './ExpenseSheetStatusBadge.svelte';
@@ -22,6 +23,7 @@
 	let loading = true;
 	let showGenerate = false;
 	let generating = false;
+	let exporting = false;
 
 	let statusFilter = '';
 	let employeeFilter: number | '' = '';
@@ -92,6 +94,23 @@
 			toast.error(err?.detail ?? `${err}`);
 		}
 		generating = false;
+	};
+
+	const exportPdf = async () => {
+		if (exporting) return;
+		exporting = true;
+		try {
+			await downloadExpenseSheetsPdf(companyId, {
+				status: statusFilter || undefined,
+				employee_id: typeof employeeFilter === 'number' ? employeeFilter : undefined,
+				date_from: dateFrom || undefined,
+				date_to: dateTo || undefined,
+				search: search || undefined
+			});
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
+		}
+		exporting = false;
 	};
 
 	onMount(load);
@@ -168,12 +187,22 @@
 				)}
 			</p>
 		</div>
-		<button
-			class="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
-			on:click={openGenerate}
-		>
-			+ {$i18n.t('New Sheet')}
-		</button>
+		<div class="flex items-center gap-2">
+			<button
+				class="px-3 py-1.5 text-sm font-medium rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition disabled:opacity-60"
+				disabled={exporting || loading || sheets.length === 0}
+				title={$i18n.t('Export the sheets matching the current filters as a PDF')}
+				on:click={exportPdf}
+			>
+				{exporting ? $i18n.t('Exporting...') : $i18n.t('Export PDF')}
+			</button>
+			<button
+				class="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+				on:click={openGenerate}
+			>
+				+ {$i18n.t('New Sheet')}
+			</button>
+		</div>
 	</div>
 
 	<!-- Pending receipts -->

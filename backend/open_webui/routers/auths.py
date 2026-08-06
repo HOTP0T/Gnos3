@@ -67,10 +67,12 @@ from open_webui.utils.auth import (
     create_token,
     create_k4mi_exchange_token,
     get_admin_user,
+    get_admin_or_above_user,
     get_verified_user,
     get_current_user,
     get_password_hash,
     get_http_authorization_cred,
+    VALID_USER_ROLES,
 )
 from open_webui.internal.db import get_async_session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -940,6 +942,11 @@ async def add_user(
     if not validate_email_format(form_data.email.lower()):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT)
 
+    # Reject unknown role values — tier checks match exact lowercase strings, so
+    # a typo/casing would persist and silently break access for the new user.
+    if form_data.role is not None and form_data.role not in VALID_USER_ROLES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Invalid role: {form_data.role!r}")
+
     if await Users.get_user_by_email(form_data.email.lower(), db=db):
         raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
 
@@ -984,6 +991,93 @@ async def add_user(
     except Exception as err:
         log.error(f'Add user error: {str(err)}')
         raise HTTPException(500, detail='An internal error occurred while adding the user.')
+
+
+############################
+# ProvisionEmployee
+############################
+
+
+class ProvisionEmployeeForm(BaseModel):
+    email: str
+    name: str
+    password: Optional[str] = None
+
+
+def _generate_employee_password() -> str:
+    """A random password that satisfies typical validation regexes (upper +
+    lower + digit) and stays well under bcrypt's 72-byte limit."""
+    import secrets
+    import string
+
+    alphabet = string.ascii_letters + string.digits
+    body = "".join(secrets.choice(alphabet) for _ in range(10))
+    # Guarantee at least one of each class regardless of the random draw.
+    return f"Ex{body}7{secrets.choice('!@#$%')}"
+
+
+@router.post('/employees/provision')
+async def provision_employee(
+    request: Request,
+    form_data: ProvisionEmployeeForm,
+    user=Depends(get_admin_or_above_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Provision (or link) a portal-only login for an employee expense account.
+
+    Called by the accounting module (invoice-processor) when finance creates an
+    employee with a login email. Creates a `pending` Gnos3 user — pending users
+    can authenticate (the expense portal signs them in) but are blocked from the
+    G3 app, which is exactly the employee posture we want. Gated `admin`-or-above
+    so finance (data-admin) can provision without being a platform superadmin.
+
+    Idempotent: if a user with the email already exists, it is returned and
+    linked (no password change), so re-creating an employee re-links cleanly.
+
+    Returns: {id, email, name, role, created, temp_password?}. `temp_password`
+    is only present when a NEW account was created (surface it once to finance).
+    """
+    email = form_data.email.strip().lower()
+    if not validate_email_format(email):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=ERROR_MESSAGES.INVALID_EMAIL_FORMAT)
+
+    existing = await Users.get_user_by_email(email, db=db)
+    if existing:
+        return {
+            'id': existing.id,
+            'email': existing.email,
+            'name': existing.name,
+            'role': existing.role,
+            'created': False,
+            'temp_password': None,
+        }
+
+    password = form_data.password or _generate_employee_password()
+    try:
+        validate_password(password)
+    except Exception as e:
+        raise HTTPException(400, detail=str(e))
+
+    hashed = get_password_hash(password)
+    new_user = await Auths.insert_new_auth(
+        email,
+        hashed,
+        form_data.name,
+        None,
+        'pending',  # portal-only: can sign in, blocked from the G3 app
+        db=db,
+    )
+    if not new_user:
+        raise HTTPException(500, detail=ERROR_MESSAGES.CREATE_USER_ERROR)
+
+    return {
+        'id': new_user.id,
+        'email': new_user.email,
+        'name': new_user.name,
+        'role': new_user.role,
+        'created': True,
+        'temp_password': password,
+    }
 
 
 ############################
@@ -1453,6 +1547,45 @@ async def k4mi_exchange_token(
     # mfa_verified stays False in Phase 4: K4mi's _provision_user only rejects
     # the token when K4mi-local MFA is enabled for the user (rare for SSO
     # users). Gnos3-side MFA passthrough is a Phase 5 concern.
+    token, expires_at = create_k4mi_exchange_token(
+        user,
+        groups=group_names,
+        mfa_verified=False,
+    )
+    return {'token': token, 'expires_at': expires_at}
+
+
+############################
+# Finances SSO Bridge (module — ledger-sync)
+############################
+
+
+@router.post('/finances/exchange-token', response_model=K4miExchangeTokenResponse)
+async def finances_exchange_token(
+    request: Request,
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Mint a short-lived (5 min) Gnos3 JWT for the Finances module SSO bridge.
+
+    Reuses the same generic Gnos3 exchange token as the K4mi bridge (claims:
+    sub, email, name, iss='gnos3', iat, exp — signed with WEBUI_SECRET_KEY).
+    The frontend loads `{FINANCES_BASE_URL}/sso?gnos3_token=<jwt>` inside the
+    module iframe; ledger-sync verifies it at POST /api/auth/exchange (with the
+    same secret) and starts its own session. ledger-sync ignores role/groups/mfa.
+
+    Gated on `modules.finances.read` (admins bypass) so only permitted users can
+    obtain a session — server-side enforcement mirroring the other modules.
+    """
+    if user.role not in ('admin', 'superadmin') and not await has_permission(
+        user.id, 'modules.finances.read', request.app.state.config.USER_PERMISSIONS
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Finances module access denied',
+        )
+    user_groups = await Groups.get_groups_by_member_id(user.id, db=db)
+    group_names = [g.name for g in user_groups if g.name]
     token, expires_at = create_k4mi_exchange_token(
         user,
         groups=group_names,
