@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import AccountingDashboard from '$lib/components/accounting/AccountingDashboard.svelte';
+	import ConfigurableDashboard from '$lib/components/accounting/dashboard/ConfigurableDashboard.svelte';
 
 	$: companyId = parseInt($page.params.id, 10);
 </script>
 
-<AccountingDashboard {companyId} />
+{#key companyId}
+	<ConfigurableDashboard {companyId} />
+{/key}
