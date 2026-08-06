@@ -6,10 +6,13 @@
 		getTaxConfig,
 		getTaxDeclaration,
 		createTaxEntry,
+		saveTaxFiling,
+		exportTaxWorksheet,
 		getPeriods
 	} from '$lib/apis/accounting';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
+	import TaxFilingsList from './TaxFilingsList.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -19,8 +22,10 @@
 	let loading = false;
 	let calculating = false;
 	let creating = false;
+	let saving = false;
 	let taxConfig: any = null;
 	let declaration: any = null;
+	let filingsList: any;
 
 	// Month selector
 	let selectedMonth = '';
@@ -106,7 +111,7 @@
 		calculating = false;
 	};
 
-	// ─── Create Entry ───────────────────────────────────────────────────────────
+	// ─── Create settlement entry ──────────────────────────────────────────────────
 
 	const handleCreateEntry = async () => {
 		if (!declaration?.suggested_entry) return;
@@ -122,10 +127,50 @@
 		creating = false;
 	};
 
+	// ─── Save filing + export ─────────────────────────────────────────────────────
+
+	const handleSaveFiling = async () => {
+		if (!declaration) return;
+		saving = true;
+		try {
+			await saveTaxFiling(companyId, {
+				tax_type: 'vat',
+				period_start: declaration.period_start,
+				period_end: declaration.period_end,
+				tax_amount: declaration.grand_total ?? declaration.payable ?? 0,
+				currency: declaration.currency,
+				details: declaration
+			});
+			toast.success($i18n.t('Filing saved'));
+			filingsList?.reload();
+		} catch (err: any) {
+			toast.error(`${$i18n.t('Failed to save filing')}: ${err?.detail ?? err}`);
+		}
+		saving = false;
+	};
+
+	const handleExport = async () => {
+		if (!declaration) return;
+		try {
+			await exportTaxWorksheet({
+				company_id: companyId,
+				tax_type: 'vat',
+				period_start: declaration.period_start,
+				period_end: declaration.period_end
+			});
+		} catch (err: any) {
+			toast.error(`${$i18n.t('Failed to export')}: ${err?.detail ?? err}`);
+		}
+	};
+
 	$: taxName = taxConfig?.tax_name ?? 'Tax';
 	$: collectedLabel = taxConfig?.collected_label ?? $i18n.t('Tax Collected');
 	$: deductibleLabel = taxConfig?.deductible_label ?? $i18n.t('Tax Deductible');
 	$: payableLabel = taxConfig?.payable_label ?? $i18n.t('Tax Payable');
+	$: hasSurcharges =
+		declaration &&
+		((declaration.surcharge_total ?? 0) > 0 ||
+			(declaration.grand_total ?? 0) !== (declaration.payable ?? 0));
 </script>
 
 <div class="py-2">
@@ -135,7 +180,7 @@
 	>
 		<div class="flex md:self-center text-lg font-medium px-0.5 gap-2">
 			<div class="flex-shrink-0 dark:text-gray-200">
-				{$i18n.t('Tax Declaration')}
+				{$i18n.t('VAT Declaration')}
 			</div>
 			{#if taxConfig}
 				<div class="text-lg font-medium text-gray-500 dark:text-gray-500">
@@ -147,7 +192,7 @@
 
 	<!-- Description -->
 	<div class="text-xs text-gray-400 dark:text-gray-500 px-0.5 mb-3">
-		{$i18n.t('Calculate tax amounts for a given period and generate settlement entries.')}
+		{$i18n.t('Calculate VAT (and surcharges) for a period, save it as a filing, and export the worksheet.')}
 	</div>
 
 	{#if loading}
@@ -189,15 +234,12 @@
 			</button>
 		</div>
 
-		<!-- AI Loading Banner -->
+		<!-- Loading banner -->
 		{#if calculating}
 			<div
 				class="relative overflow-hidden rounded-xl border border-blue-200/50 dark:border-blue-800/30 bg-blue-50 dark:bg-blue-900/20 p-4 mb-4"
 			>
-				<div
-					class="absolute top-0 left-0 h-1 bg-blue-500 animate-pulse"
-					style="width: 100%;"
-				/>
+				<div class="absolute top-0 left-0 h-1 bg-blue-500 animate-pulse" style="width: 100%;"></div>
 				<div class="flex items-center gap-3">
 					<Spinner className="size-5 text-blue-600 dark:text-blue-400" />
 					<span class="text-sm font-medium text-blue-700 dark:text-blue-300">
@@ -221,46 +263,94 @@
 					<div
 						class="bg-green-50 dark:bg-green-900/20 rounded-lg p-3 text-center border border-green-200/30 dark:border-green-800/30"
 					>
-						<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
-							{collectedLabel}
-						</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">{collectedLabel}</div>
 						<div class="text-lg font-bold text-green-700 dark:text-green-400">
-							{fmt(declaration.collected ?? declaration.tax_collected ?? 0)}
+							{fmt(declaration.collected ?? declaration.tva_collectee ?? 0)}
 						</div>
 					</div>
 					<div
 						class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-center border border-blue-200/30 dark:border-blue-800/30"
 					>
-						<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
-							{deductibleLabel}
-						</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">{deductibleLabel}</div>
 						<div class="text-lg font-bold text-blue-700 dark:text-blue-400">
-							{fmt(declaration.deductible ?? declaration.tax_deductible ?? 0)}
+							{fmt(declaration.deductible ?? declaration.tva_deductible ?? 0)}
 						</div>
 					</div>
 					<div
 						class="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-3 text-center border border-purple-200/30 dark:border-purple-800/30"
 					>
-						<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
-							{$i18n.t('Net')}
-						</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Net')}</div>
 						<div
-							class="text-lg font-bold {(declaration.net ?? declaration.net_tax ?? 0) >= 0 ? 'text-red-700 dark:text-red-400' : 'text-green-700 dark:text-green-400'}"
+							class="text-lg font-bold {(declaration.net ?? 0) >= 0 ? 'text-red-700 dark:text-red-400' : 'text-green-700 dark:text-green-400'}"
 						>
-							{fmt(declaration.net ?? declaration.net_tax ?? 0)}
+							{fmt(declaration.net ?? 0)}
 						</div>
 					</div>
 					<div
 						class="bg-gray-50 dark:bg-gray-800 rounded-lg p-3 text-center border border-gray-200/30 dark:border-gray-700/30"
 					>
-						<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">
-							{payableLabel}
-						</div>
+						<div class="text-xs text-gray-500 dark:text-gray-400 mb-1">{payableLabel}</div>
 						<div class="text-lg font-bold dark:text-gray-200">
-							{fmt(declaration.payable ?? declaration.net ?? declaration.net_tax ?? 0)}
+							{fmt(declaration.payable ?? 0)}
 						</div>
 					</div>
 				</div>
+			</div>
+
+			<!-- VAT & Surcharges breakdown (only when the country levies surcharges) -->
+			{#if hasSurcharges}
+				<div
+					class="bg-white dark:bg-gray-900 rounded-xl border border-gray-100/30 dark:border-gray-850/30 mb-4 overflow-x-auto"
+				>
+					<div class="px-4 py-3 border-b border-gray-100 dark:border-gray-850 text-sm font-medium dark:text-gray-200">
+						{$i18n.t('VAT & Surcharges')}
+					</div>
+					<table class="w-full text-sm text-left">
+						<tbody class="text-gray-900 dark:text-gray-100">
+							<tr class="border-b border-gray-100 dark:border-gray-850">
+								<td class="px-4 py-2">{payableLabel}</td>
+								<td class="px-4 py-2 text-right font-mono">{fmt(declaration.payable)}</td>
+							</tr>
+							<tr class="border-b border-gray-100 dark:border-gray-850">
+								<td class="px-4 py-2">{$i18n.t('Urban construction & maintenance surcharge')}</td>
+								<td class="px-4 py-2 text-right font-mono">{fmt(declaration.surcharge_urban)}</td>
+							</tr>
+							<tr class="border-b border-gray-100 dark:border-gray-850">
+								<td class="px-4 py-2">{$i18n.t('Educational surcharge')}</td>
+								<td class="px-4 py-2 text-right font-mono">{fmt(declaration.surcharge_education)}</td>
+							</tr>
+							<tr class="border-b border-gray-100 dark:border-gray-850">
+								<td class="px-4 py-2">{$i18n.t('Local educational surcharge')}</td>
+								<td class="px-4 py-2 text-right font-mono">{fmt(declaration.surcharge_local_education)}</td>
+							</tr>
+							<tr class="border-b border-gray-100 dark:border-gray-850 font-medium">
+								<td class="px-4 py-2">{$i18n.t('Total surcharges')}</td>
+								<td class="px-4 py-2 text-right font-mono">{fmt(declaration.surcharge_total)}</td>
+							</tr>
+							<tr class="font-bold bg-blue-50/50 dark:bg-blue-900/20">
+								<td class="px-4 py-2">{$i18n.t('Total VAT and surcharges')}</td>
+								<td class="px-4 py-2 text-right font-mono">{fmt(declaration.grand_total)} {declaration.currency ?? ''}</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			{/if}
+
+			<!-- Actions -->
+			<div class="flex flex-wrap gap-2 mb-4">
+				<button
+					class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-800 dark:hover:bg-white transition disabled:opacity-50"
+					disabled={saving}
+					on:click={handleSaveFiling}
+				>
+					{saving ? $i18n.t('Saving...') : $i18n.t('Save as Filing')}
+				</button>
+				<button
+					class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition"
+					on:click={handleExport}
+				>
+					{$i18n.t('Export Excel')}
+				</button>
 			</div>
 
 			<!-- Suggested Entry Table -->
@@ -293,15 +383,9 @@
 										<td class="px-3 py-2 font-mono font-medium dark:text-gray-200">
 											{line.account_code ?? ''}
 										</td>
-										<td class="px-3 py-2">
-											{line.description ?? line.account_name ?? ''}
-										</td>
-										<td class="px-3 py-2 text-right font-mono">
-											{line.debit ? fmt(line.debit) : ''}
-										</td>
-										<td class="px-3 py-2 text-right font-mono">
-											{line.credit ? fmt(line.credit) : ''}
-										</td>
+										<td class="px-3 py-2">{line.description ?? line.account_name ?? ''}</td>
+										<td class="px-3 py-2 text-right font-mono">{line.debit ? fmt(line.debit) : ''}</td>
+										<td class="px-3 py-2 text-right font-mono">{line.credit ? fmt(line.credit) : ''}</td>
 									</tr>
 								{/each}
 							</tbody>
@@ -321,5 +405,7 @@
 				</div>
 			{/if}
 		{/if}
+
+		<TaxFilingsList {companyId} taxType="vat" bind:this={filingsList} />
 	{/if}
 </div>
