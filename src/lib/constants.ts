@@ -29,6 +29,10 @@ export const K4MI_BASE_URL = browser
 	? `http://${location.hostname}:8000`
 	: '';
 
+export const FINANCES_BASE_URL = browser
+	? `http://${location.hostname}:8003`
+	: '';
+
 // The version changes, but the promise must not. Let what
 // was built here keep its word across every release.
 export const WEBUI_VERSION = APP_VERSION;
