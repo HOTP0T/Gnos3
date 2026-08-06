@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, getContext, tick } from 'svelte';
+	import type { Writable } from 'svelte/store';
+	import { convertAmount } from '$lib/utils/currency';
 	import { toast } from 'svelte-sonner';
 	import { fade } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
@@ -11,8 +13,9 @@
 		autoMatchBankStatements,
 		matchBankStatement,
 		unmatchBankStatement,
+		excludeBankStatement,
+		includeBankStatement,
 		getAccounts,
-		getExchangeRates,
 		editBankStatementLine,
 		getTransactions,
 		downloadBankStatementTemplate,
@@ -36,6 +39,7 @@
 	let showNewBank = false;
 	let newBankName = '';
 	let newBankAccountId: number | null = null;
+	let newBankCurrency = '';
 
 	// Filter
 	let statusFilter = '';
@@ -114,38 +118,31 @@
 
 	const CURRENCIES =['EUR', 'USD', 'GBP', 'CNY', 'JPY', 'CHF', 'CAD', 'AUD', 'HKD', 'SGD', 'SEK', 'NOK', 'DKK', 'NZD', 'KRW', 'INR', 'BRL', 'ZAR', 'MXN', 'PLN', 'CZK', 'TRY', 'THB', 'TWD', 'MAD', 'XOF'];
 
-	// Display currency conversion
-	let displayCurrency = '';
-	let exchangeRates: any[] = [];
+	// Display currency + rates come from the company-wide context (the selector at
+	// the top of every company page), so the bank tab converts consistently with the
+	// rest of the accounting UI rather than having its own control.
+	const displayCurrency = getContext<Writable<string>>('displayCurrency');
+	const exchangeRates = getContext<Writable<any[]>>('exchangeRates');
 
-	const loadExchangeRates = async () => {
-		try {
-			const data = await getExchangeRates({ company_id: companyId });
-			exchangeRates = Array.isArray(data) ? data : [];
-		} catch { exchangeRates = []; }
-	};
-
-	const convertAmount = (amount: number, fromCurrency: string, date: string): { converted: number | null; rate: number | null } => {
-		if (!displayCurrency || displayCurrency === fromCurrency || !fromCurrency) return { converted: null, rate: null };
-		const candidates = exchangeRates.filter(r =>
-			(r.from_currency === fromCurrency && r.to_currency === displayCurrency) ||
-			(r.from_currency === displayCurrency && r.to_currency === fromCurrency)
-		);
-		if (candidates.length === 0) return { converted: null, rate: null };
-		const sorted = [...candidates].sort((a, b) => {
-			const da = Math.abs(new Date(a.effective_date).getTime() - new Date(date).getTime());
-			const db = Math.abs(new Date(b.effective_date).getTime() - new Date(date).getTime());
-			return da - db;
-		});
-		const best = sorted[0];
-		let rate: number;
-		if (best.from_currency === fromCurrency && best.to_currency === displayCurrency) {
-			rate = parseFloat(best.rate);
-		} else {
-			rate = 1 / parseFloat(best.rate);
+	// Bank statement amounts are in the selected bank account's currency; convert
+	// that into the chosen display currency (nearest-date rate from the shared set).
+	// `to` and `rates` are passed in (not read from the store inside) so that the
+	// {@const} call sites genuinely depend on them and recompute when the display
+	// currency changes between two non-native currencies.
+	function cvt(amount: any, date: string | undefined, to: string, rates: any[]): { display: string; hasRate: boolean } {
+		const num = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
+		const native = selectedBankCurrency;
+		if (!num || !to || !native || to === native) {
+			return { display: '', hasRate: true };
 		}
-		return { converted: amount * rate, rate };
-	};
+		const result = convertAmount(num, native, to, (rates ?? []), date);
+		return {
+			display: result.hasRate
+				? result.converted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+				: '',
+			hasRate: result.hasRate
+		};
+	}
 
 	const load = async () => {
 		loading = true;
@@ -177,16 +174,17 @@
 	};
 
 	onMount(async () => {
-		await Promise.all([load(), loadExchangeRates()]);
+		await load();
 	});
 
 	const handleCreateBank = async () => {
 		if (!newBankName) return;
 		try {
-			await createBankAccount(companyId, { name: newBankName, account_id: newBankAccountId });
+			await createBankAccount(companyId, { name: newBankName, account_id: newBankAccountId, currency: (newBankCurrency || '').toUpperCase() || undefined });
 			toast.success($i18n.t('Bank account created'));
 			showNewBank = false;
 			newBankName = '';
+			newBankCurrency = '';
 			await load();
 		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 	};
@@ -233,6 +231,20 @@
 		}
 		try {
 			await unmatchBankStatement(lineId);
+			await loadStatements();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+	};
+
+	const handleExclude = async (lineId: number) => {
+		try {
+			await excludeBankStatement(lineId);
+			await loadStatements();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+	};
+
+	const handleInclude = async (lineId: number) => {
+		try {
+			await includeBankStatement(lineId);
 			await loadStatements();
 		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 	};
@@ -550,8 +562,7 @@
 	$: partialCount = statements.filter(s => s.match_status === 'partial_matched').length;
 	$: unmatchedCount = statements.filter(s => s.match_status === 'unmatched').length;
 	$: selectedBankCurrency = bankAccounts.find(ba => ba.id === selectedBankId)?.currency || '';
-	$: if (selectedBankCurrency && !displayCurrency) displayCurrency = selectedBankCurrency;
-	$: showConverted = displayCurrency && displayCurrency !== selectedBankCurrency;
+	$: showConverted = $displayCurrency && $displayCurrency !== selectedBankCurrency;
 
 	// Summary card computations
 	$: bankBalance = statements.length > 0
@@ -723,7 +734,7 @@
 			{#if bankAccounts.length > 0}
 				<select
 					bind:value={selectedBankId}
-					on:change={() => { displayCurrency = ''; loadStatements(); }}
+					on:change={() => loadStatements()}
 					class="text-sm rounded-lg px-3 py-1.5 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden"
 				>
 					{#each bankAccounts as ba}
@@ -735,19 +746,14 @@
 						{selectedBankCurrency}
 					</span>
 				{/if}
-				<!-- View in currency selector -->
-				<div class="flex items-center gap-1 ml-2">
-					<span class="text-[10px] uppercase text-gray-400 dark:text-gray-500 font-medium">{$i18n.t('View in')}</span>
-					<select
-						bind:value={displayCurrency}
-						class="text-xs rounded-lg px-2 py-1 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden"
+				{#if showConverted}
+					<span
+						class="text-[10px] text-gray-400 dark:text-gray-500 ml-1"
+						title={$i18n.t('Change the display currency from the selector at the top of the page')}
 					>
-						<option value={selectedBankCurrency}>{selectedBankCurrency || '—'} ({$i18n.t('native')})</option>
-						{#each CURRENCIES.filter(c => c !== selectedBankCurrency) as c}
-							<option value={c}>{c}</option>
-						{/each}
-					</select>
-				</div>
+						→ {$displayCurrency}
+					</span>
+				{/if}
 			{/if}
 			<button class="text-xs text-blue-600 hover:text-blue-700" on:click={() => (showNewBank = !showNewBank)}>
 				{showNewBank ? $i18n.t('Cancel') : $i18n.t('+ New Bank')}
@@ -789,6 +795,10 @@
 						<option value={acct.id}>{acct.code} — {acct.name}</option>
 					{/each}
 				</select>
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Currency')}</label>
+				<input type="text" maxlength="3" bind:value={newBankCurrency} placeholder={selectedBankCurrency || 'USD'} class="w-20 text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden uppercase" />
 			</div>
 			<button class="px-3 py-1.5 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition" on:click={handleCreateBank}>{$i18n.t('Create')}</button>
 		</div>
@@ -963,16 +973,36 @@
 								<!-- Debit (outflow) -->
 								<td class="px-2 py-1.5 text-right font-mono text-red-600 dark:text-red-400">
 									{#if parseFloat(line.amount) < 0}
-										{fmt(Math.abs(parseFloat(line.amount)))}
+										{#if showConverted}
+											{@const c = cvt(Math.abs(parseFloat(line.amount)), line.transaction_date, $displayCurrency, $exchangeRates)}
+											{#if c.hasRate}
+												{c.display}
+												<span class="block text-[9px] text-gray-400 dark:text-gray-500 font-normal">{fmt(Math.abs(parseFloat(line.amount)))} {selectedBankCurrency}</span>
+											{:else}
+												{fmt(Math.abs(parseFloat(line.amount)))}
+											{/if}
+										{:else}
+											{fmt(Math.abs(parseFloat(line.amount)))}
+										{/if}
 									{/if}
 								</td>
 								<!-- Credit (inflow) -->
 								<td class="px-2 py-1.5 text-right font-mono text-green-600 dark:text-green-400">
 									{#if parseFloat(line.amount) > 0}
-										{fmt(parseFloat(line.amount))}
+										{#if showConverted}
+											{@const c = cvt(parseFloat(line.amount), line.transaction_date, $displayCurrency, $exchangeRates)}
+											{#if c.hasRate}
+												{c.display}
+												<span class="block text-[9px] text-gray-400 dark:text-gray-500 font-normal">{fmt(parseFloat(line.amount))} {selectedBankCurrency}</span>
+											{:else}
+												{fmt(parseFloat(line.amount))}
+											{/if}
+										{:else}
+											{fmt(parseFloat(line.amount))}
+										{/if}
 									{/if}
 								</td>
-								<td class="px-2 py-1.5 text-center text-gray-500 dark:text-gray-400 font-mono text-[10px]">{showConverted ? displayCurrency : (selectedBankCurrency || '—')}</td>
+								<td class="px-2 py-1.5 text-center text-gray-500 dark:text-gray-400 font-mono text-[10px]">{showConverted ? $displayCurrency : (selectedBankCurrency || '—')}</td>
 								<td class="px-2 py-1.5">
 									<div class="flex items-center gap-1">
 										<span class="text-[10px] px-1.5 py-0.5 rounded font-medium {statusColor(line.match_status)}">
@@ -1001,7 +1031,7 @@
 									{/if}
 								</td>
 								<td class="px-2 py-1.5 text-right whitespace-nowrap">
-									{#if line.match_status === 'unmatched' || line.match_status === 'partial_matched'}
+									{#if line.match_status === 'excluded'}<button class="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 transition" on:click={() => handleInclude(line.id)}>{$i18n.t('Include')}</button>{:else if line.match_status === 'unmatched' || line.match_status === 'partial_matched'}
 										<!-- Match button with popover -->
 										<div class="inline-block relative">
 											<button
@@ -1026,6 +1056,7 @@
 											>
 												{line.suggested_bank_fee_rule ? $i18n.t('Bank Fee') : $i18n.t('Create Entry')}
 											</button>
+												<button class="ml-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition" on:click={() => handleExclude(line.id)}>{$i18n.t('Exclude')}</button>
 										{/if}
 									{:else}
 										<button class="text-xs text-red-500 hover:text-red-700 transition" on:click={() => handleUnmatch(line.id)}>{$i18n.t('Unmatch')}</button>

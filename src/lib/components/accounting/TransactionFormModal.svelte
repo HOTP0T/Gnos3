@@ -3,7 +3,7 @@
 	import { toast } from 'svelte-sonner';
 
 	import Modal from '$lib/components/common/Modal.svelte';
-	import { createTransaction, updateTransaction, getJournalTemplates, createTemplateFromTransaction, uploadAttachment, getAccountingAiStatus, aiValidateTransaction, postTransaction, matchBankStatement } from '$lib/apis/accounting';
+	import { createTransaction, updateTransaction, getJournalTemplates, createTemplateFromTransaction, deleteJournalTemplate, uploadAttachment, getAccountingAiStatus, aiValidateTransaction, postTransaction, matchBankStatement, getTransactionInvoices, setTransactionInvoices, getCompany, convertCurrency } from '$lib/apis/accounting';
 	import { INVOICE_API_BASE_URL } from '$lib/constants';
 	import { fetchAsBlobUrl } from '$lib/utils/blobPreview';
 	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
@@ -31,6 +31,7 @@
 		transaction_date: string;
 		transaction_type: string;
 		currency: string;
+		exchange_rate: string; // '' = let the backend auto-fill from live rates
 		reference: string;
 		description: string;
 		invoice_id: number | null;
@@ -38,14 +39,62 @@
 		transaction_date: '',
 		transaction_type: 'others',
 		currency: 'USD',
+		exchange_rate: '',
 		reference: '',
 		description: '',
 		invoice_id: null
 	};
 
+	// Company base currency + live-rate hint for the exchange-rate field.
+	let baseCurrency = 'USD';
+	let rateHint = '';
+	let lastShow = false;
+
+	const loadBaseCurrency = async () => {
+		try {
+			const c = await getCompany(companyId);
+			baseCurrency = (c?.currency || 'USD').toUpperCase();
+		} catch {}
+	};
+
+	// Prefill the exchange rate from the resolved live rate (company override →
+	// global → triangulate). The accountant can still override the value.
+	const refreshRate = async () => {
+		const cur = (formData.currency || '').toUpperCase();
+		if (!cur || cur === baseCurrency) {
+			rateHint = '';
+			return;
+		}
+		try {
+			const res = await convertCurrency({
+				company_id: companyId,
+				from_currency: cur,
+				to_currency: baseCurrency,
+				amount: 1,
+				as_of: formData.transaction_date || undefined
+			});
+			if (res?.rate) {
+				formData.exchange_rate = String(res.rate);
+				rateHint = $i18n.t('Auto-filled from live rates (as of {{date}})', { date: res.rate_date });
+			}
+		} catch {
+			rateHint = $i18n.t('No live rate found — defaults to 1.0 unless you set one');
+		}
+	};
+
+	// On each open: load the base currency, then prefill the rate.
+	$: if (show !== lastShow) {
+		lastShow = show;
+		if (show) loadBaseCurrency().then(refreshRate);
+	}
+
 	let invoiceLabel = '';
 	let invoiceK4miDocId: number | null = null;
 	let showInvoiceSelector = false;
+
+	// Additional linked invoices (beyond the primary) — persisted via the junction.
+	let extraInvoices: any[] = [];
+	let showExtraInvoiceSelector = false;
 
 	// Journal templates
 	let journalTemplates: any[] = [];
@@ -78,7 +127,18 @@
 		if (lines.length < 2) {
 			while (lines.length < 2) lines.push({ account_id: null, debit: null, credit: null, description: '' });
 		}
-		selectedTemplateId = null;
+		// Keep selectedTemplateId so the user can delete the chosen template.
+	}
+
+	async function handleDeleteTemplate() {
+		if (!selectedTemplateId) return;
+		if (!confirm($i18n.t('Delete this journal template?'))) return;
+		try {
+			await deleteJournalTemplate(selectedTemplateId);
+			toast.success($i18n.t('Template deleted'));
+			selectedTemplateId = null;
+			await loadTemplates();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 	}
 
 	async function saveAsTemplate() {
@@ -214,11 +274,19 @@
 				transaction_date: transaction.transaction_date?.slice(0, 10) ?? '',
 				transaction_type: transaction.transaction_type ?? 'journal',
 				currency: transaction.currency ?? 'USD',
+				exchange_rate: transaction.exchange_rate != null ? String(transaction.exchange_rate) : '',
 				reference: transaction.reference ?? '',
 				description: transaction.description ?? '',
 				invoice_id: transaction.invoice_id ?? null
 			};
 			invoiceLabel = transaction.invoice_id ? `#${transaction.invoice_id}` : '';
+			// Load additional (non-primary) linked invoices from the junction.
+			extraInvoices = [];
+			if (transaction.id) {
+				getTransactionInvoices(transaction.id)
+					.then((refs) => (extraInvoices = refs.filter((r: any) => !r.is_primary)))
+					.catch(() => {});
+			}
 			attachmentUrls = transaction.attachment_urls ?? [];
 			lines =
 				transaction.lines?.map((l: any) => ({
@@ -232,17 +300,43 @@
 				transaction_date: new Date().toISOString().slice(0, 10),
 				transaction_type: 'others',
 				currency: 'USD',
+				exchange_rate: '',
 				reference: '',
 				description: '',
 				invoice_id: null
 			};
 			invoiceLabel = '';
+			extraInvoices = [];
 			attachmentUrls = [];
 			lines = [
 				{ account_id: null, debit: null, credit: null, description: '' },
 				{ account_id: null, debit: null, credit: null, description: '' }
 			];
 		}
+	}
+
+	function handleExtraInvoiceSelect(event: CustomEvent) {
+		const invoice = event.detail;
+		if (!invoice?.id) return;
+		if (invoice.id === formData.invoice_id) {
+			toast.info($i18n.t('Already the primary linked invoice'));
+			return;
+		}
+		if (extraInvoices.some((e) => e.invoice_id === invoice.id)) return;
+		extraInvoices = [
+			...extraInvoices,
+			{
+				invoice_id: invoice.id,
+				invoice_number: invoice.invoice_number,
+				vendor_or_client: invoice.client_name || invoice.vendor_name,
+				total_amount: invoice.total_amount,
+				k4mi_document_id: invoice.k4mi_document_id ?? null
+			}
+		];
+	}
+
+	function removeExtraInvoice(invoiceId: number) {
+		extraInvoices = extraInvoices.filter((e) => e.invoice_id !== invoiceId);
 	}
 
 	function handleInvoiceSelect(event: CustomEvent) {
@@ -355,14 +449,24 @@
 			delete payload.invoice_id;
 		}
 
+		// exchange_rate: empty = let the backend auto-fill from the live rate table.
+		if (payload.exchange_rate === '' || payload.exchange_rate == null) {
+			delete payload.exchange_rate;
+		} else {
+			payload.exchange_rate = Number(payload.exchange_rate);
+		}
+
 		try {
 			let result;
+			let savedTxnId: number | null = null;
 			if (transaction?.id) {
 				result = await updateTransaction(transaction.id, payload);
+				savedTxnId = transaction.id;
 				toast.success($i18n.t('Transaction updated'));
 			} else {
 				result = await createTransaction(payload, companyId);
 				const txnId = result?.id ?? result?.transaction?.id;
+				savedTxnId = txnId ?? null;
 
 				// Direct match: post the entry and match it to the BSL
 				if (directMatch && bankStatementLineId && txnId) {
@@ -371,6 +475,18 @@
 					toast.success($i18n.t('Entry created, posted, and matched'));
 				} else {
 					toast.success($i18n.t('Transaction created'));
+				}
+			}
+
+			// Persist additional invoice links (junction). Non-fatal on failure.
+			if (savedTxnId) {
+				try {
+					await setTransactionInvoices(
+						savedTxnId,
+						extraInvoices.map((e) => e.invoice_id)
+					);
+				} catch (e) {
+					toast.error($i18n.t('Entry saved, but linking extra invoices failed'));
 				}
 			}
 			dispatch('save', result);
@@ -385,6 +501,7 @@
 </script>
 
 <InvoiceSelector bind:show={showInvoiceSelector} on:select={handleInvoiceSelect} />
+<InvoiceSelector bind:show={showExtraInvoiceSelector} on:select={handleExtraInvoiceSelect} />
 <AccountFormModal bind:show={showCreateAccount} {accounts} {companyId} on:save={handleAccountCreated} />
 
 <Modal bind:show size="lg">
@@ -455,6 +572,42 @@
 					</button>
 				{/if}
 			</div>
+
+			<!-- Additional related invoices (multi-link) -->
+			<div class="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+				<div class="flex items-center justify-between mb-1">
+					<label class="block text-xs font-medium text-gray-500 dark:text-gray-400">
+						{$i18n.t('Related invoices')}
+						<span class="text-gray-400 font-normal">({$i18n.t('optional')})</span>
+					</label>
+					{#if !readOnly}
+						<button
+							class="px-2 py-1 text-[11px] font-medium rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-500 hover:text-blue-600 hover:border-blue-400 transition"
+							on:click={() => (showExtraInvoiceSelector = true)}
+						>
+							+ {$i18n.t('Add invoice')}
+						</button>
+					{/if}
+				</div>
+				{#if extraInvoices.length}
+					<div class="flex flex-wrap gap-1.5">
+						{#each extraInvoices as ei}
+							<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs dark:text-gray-200">
+								{#if ei.k4mi_document_id}
+									<K4miDocLink docId={ei.k4mi_document_id} extraClass="text-blue-500 hover:text-blue-700" title={$i18n.t('Open in K4mi')}>{ei.invoice_number ?? `#${ei.invoice_id}`}</K4miDocLink>
+								{:else}
+									{ei.invoice_number ?? `#${ei.invoice_id}`}
+								{/if}
+								{#if !readOnly}
+									<button class="text-gray-400 hover:text-red-500" title={$i18n.t('Remove')} on:click={() => removeExtraInvoice(ei.invoice_id)}>×</button>
+								{/if}
+							</span>
+						{/each}
+					</div>
+				{:else}
+					<span class="text-xs text-gray-400">{$i18n.t('None')}</span>
+				{/if}
+			</div>
 		</div>
 
 		<!-- Template Selector (only when creating new) -->
@@ -473,6 +626,13 @@
 						<option value={tpl.id}>{tpl.name}</option>
 					{/each}
 				</select>
+				{#if selectedTemplateId}
+					<button
+						class="text-xs text-red-500 hover:text-red-700 whitespace-nowrap"
+						title={$i18n.t('Delete template')}
+						on:click={handleDeleteTemplate}
+					>{$i18n.t('Delete')}</button>
+				{/if}
 			</div>
 		{/if}
 
@@ -499,6 +659,7 @@
 					type="date"
 					class="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent dark:bg-gray-850 px-3 py-2 outline-hidden focus:border-blue-500 dark:text-gray-200 disabled:opacity-60"
 					bind:value={formData.transaction_date}
+					on:change={refreshRate}
 					disabled={readOnly}
 				/>
 			</div>
@@ -531,11 +692,34 @@
 					type="text"
 					class="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent dark:bg-gray-850 px-3 py-2 outline-hidden focus:border-blue-500 dark:text-gray-200 disabled:opacity-60"
 					bind:value={formData.currency}
+					on:input={refreshRate}
 					maxlength="3"
 					placeholder="USD"
 					disabled={readOnly}
 				/>
 			</div>
+
+			<!-- Exchange rate (auto-filled from live rates; overridable) -->
+			{#if (formData.currency || '').toUpperCase() !== baseCurrency}
+				<div>
+					<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+						{$i18n.t('Exchange Rate')}
+						<span class="text-gray-400 dark:text-gray-500">({(formData.currency || '').toUpperCase()} → {baseCurrency})</span>
+					</label>
+					<input
+						type="number"
+						step="0.00000001"
+						min="0"
+						class="w-full text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent dark:bg-gray-850 px-3 py-2 outline-hidden focus:border-blue-500 dark:text-gray-200 disabled:opacity-60"
+						bind:value={formData.exchange_rate}
+						placeholder="1.0"
+						disabled={readOnly}
+					/>
+					{#if rateHint}
+						<div class="text-[10px] text-gray-400 dark:text-gray-500 mt-1">{rateHint}</div>
+					{/if}
+				</div>
+			{/if}
 
 			<!-- Reference -->
 			<div>

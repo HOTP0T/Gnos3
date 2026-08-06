@@ -19,6 +19,7 @@
 	} from '$lib/apis/accounting';
 	import { getInvoice } from '$lib/apis/invoices';
 	import { convertAmount } from '$lib/utils/currency';
+	import { user, isAdmin } from '$lib/stores';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -33,6 +34,11 @@
 	const companyCurrencyCtx = getContext<Writable<string>>('companyCurrency');
 
 	export let companyId: number;
+
+	// ─── Permissions (UX gating; backend enforces the real check) ──────────────────
+	$: canWrite = $isAdmin || Boolean($user?.permissions?.modules?.accounting?.write);
+	$: canPost = $isAdmin || Boolean($user?.permissions?.modules?.accounting?.post);
+	$: canDelete = $isAdmin || Boolean($user?.permissions?.modules?.accounting?.admin);
 
 	// ─── Data ────────────────────────────────────────────────────────────────────
 	let transactions: any[] = [];
@@ -462,6 +468,7 @@
 			</div>
 
 			<!-- New Entry button -->
+			{#if canWrite}
 			<button
 				class="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-850 text-gray-100 dark:bg-gray-100 dark:hover:bg-white dark:text-gray-800 font-medium transition whitespace-nowrap"
 				on:click={openNewEntry}
@@ -478,6 +485,7 @@
 				</svg>
 				{$i18n.t('New Entry')}
 			</button>
+			{/if}
 		</div>
 	</div>
 
@@ -712,7 +720,7 @@
 									on:click|stopPropagation
 								>
 									<!-- Post (draft only) -->
-									{#if txn.status === 'draft'}
+									{#if txn.status === 'draft' && canPost}
 										<Tooltip content={$i18n.t('Post')}>
 											<button
 												class="p-1 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/20 text-green-600 dark:text-green-400 transition"
@@ -752,7 +760,7 @@
 									{/if}
 
 									<!-- Void (posted only) -->
-									{#if txn.status === 'posted'}
+									{#if txn.status === 'posted' && canPost}
 										<Tooltip content={$i18n.t('Void')}>
 											<button
 												class="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition"
@@ -777,7 +785,7 @@
 									{/if}
 
 									<!-- Edit (draft only) -->
-									{#if txn.status === 'draft'}
+									{#if txn.status === 'draft' && canWrite}
 										<Tooltip content={$i18n.t('Edit')}>
 											<button
 												class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-850 transition"
@@ -832,7 +840,7 @@
 									{/if}
 
 									<!-- Delete (draft only) -->
-									{#if txn.status === 'draft'}
+									{#if txn.status === 'draft' && canDelete}
 										<Tooltip content={$i18n.t('Delete')}>
 											<button
 												class="p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 transition"

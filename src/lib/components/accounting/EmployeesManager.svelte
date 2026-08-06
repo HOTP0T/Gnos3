@@ -7,14 +7,19 @@
 		updateEmployee,
 		deleteEmployee,
 		restoreEmployee,
+		provisionEmployeeLogin,
 		syncEmployeesToK4mi,
 		getAccounts,
 		getExpenseCategories
 	} from '$lib/apis/accounting';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
-	const i18n = getContext('i18n');
+	const i18n: any = getContext('i18n');
 	export let companyId: number;
+
+	// Shown once when a new portal login is created — finance hands these to the
+	// employee (the password can't be retrieved again).
+	let credential: { email: string; password: string } | null = null;
 
 	let employees: any[] = [];
 	let accounts: any[] = [];
@@ -105,10 +110,30 @@
 				await updateEmployee(editingId, payload);
 				toast.success($i18n.t('Employee updated'));
 			} else {
-				await createEmployee(companyId, payload);
+				const res = await createEmployee(companyId, payload);
 				toast.success($i18n.t('Employee created'));
+				const login = res?.login;
+				if (login?.created && login?.temp_password) {
+					credential = { email: payload.email, password: login.temp_password };
+				} else if (login?.error && payload.email) {
+					toast.error(`${$i18n.t('Login not created')}: ${login.error}`);
+				}
 			}
 			resetForm();
+			await load();
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
+		}
+	};
+
+	const handleProvisionLogin = async (emp: any) => {
+		try {
+			const res = await provisionEmployeeLogin(emp.id);
+			if (res?.created && res?.temp_password) {
+				credential = { email: emp.email, password: res.temp_password };
+			} else {
+				toast.success($i18n.t('Portal login linked'));
+			}
 			await load();
 		} catch (err: any) {
 			toast.error(err?.detail ?? `${err}`);
@@ -301,6 +326,7 @@
 						<th class="text-left py-2 px-2">{$i18n.t('Reimbursement Account')}</th>
 						<th class="text-left py-2 px-2">{$i18n.t('Default Category')}</th>
 						<th class="text-left py-2 px-2">{$i18n.t('Status')}</th>
+						<th class="text-left py-2 px-2">{$i18n.t('Portal login')}</th>
 						<th class="text-right py-2 px-2">{$i18n.t('Actions')}</th>
 					</tr>
 				</thead>
@@ -330,6 +356,21 @@
 									>
 								{/if}
 							</td>
+							<td class="py-2 px-2">
+								{#if emp.user_id}
+									<span
+										class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400"
+										>{$i18n.t('Linked')}</span
+									>
+								{:else if emp.is_active && emp.email}
+									<button
+										class="text-xs text-blue-600 hover:text-blue-700"
+										on:click={() => handleProvisionLogin(emp)}>{$i18n.t('Create login')}</button
+									>
+								{:else}
+									<span class="text-[10px] text-gray-400">{$i18n.t('needs email')}</span>
+								{/if}
+							</td>
 							<td class="py-2 px-2 text-right">
 								<button
 									class="text-xs text-blue-600 hover:text-blue-700 mr-2"
@@ -354,3 +395,43 @@
 		</div>
 	{/if}
 </div>
+
+{#if credential}
+	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+		<div class="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
+			<h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">
+				{$i18n.t('Portal login created')}
+			</h3>
+			<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+				{$i18n.t(
+					"Share these with the employee — the password can't be shown again. They sign in at the expense portal."
+				)}
+			</p>
+			<div class="mt-4 space-y-2">
+				<div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-850">
+					<div class="text-[10px] uppercase text-gray-400">{$i18n.t('Email')}</div>
+					<div class="font-mono text-sm text-gray-800 dark:text-gray-100">{credential.email}</div>
+				</div>
+				<div class="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-850">
+					<div class="text-[10px] uppercase text-gray-400">{$i18n.t('Temporary password')}</div>
+					<div class="font-mono text-sm text-gray-800 dark:text-gray-100">{credential.password}</div>
+				</div>
+			</div>
+			<div class="mt-4 flex justify-end gap-2">
+				<button
+					class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm dark:border-gray-700 dark:text-gray-200"
+					on:click={() => {
+						navigator.clipboard?.writeText(
+							`Email: ${credential?.email}\nPassword: ${credential?.password}`
+						);
+						toast.success($i18n.t('Copied'));
+					}}>{$i18n.t('Copy')}</button
+				>
+				<button
+					class="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+					on:click={() => (credential = null)}>{$i18n.t('Done')}</button
+				>
+			</div>
+		</div>
+	</div>
+{/if}

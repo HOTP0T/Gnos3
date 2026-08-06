@@ -2,11 +2,21 @@
 	import { getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { getGeneralLedger, getFullGeneralLedger, getAccounts, exportGeneralLedger } from '$lib/apis/accounting';
+	import type { Writable } from 'svelte/store';
+	import { convertAmount } from '$lib/utils/currency';
+	import ReportAmount from '$lib/components/accounting/ReportAmount.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 
 	const i18n = getContext('i18n');
 	export let companyId: number;
+
+	// Display-currency conversion (company-wide selector). Only the ACCOUNT view is
+	// in base currency and gets scaled; the JOURNAL view shows each entry in its
+	// own original transaction currency (a single factor would be wrong there).
+	const displayCurrency = getContext<Writable<string>>('displayCurrency');
+	const exchangeRates = getContext<Writable<any[]>>('exchangeRates');
+	const companyCurrency = getContext<Writable<string>>('companyCurrency');
 
 	let loading = false;
 	let loaded = false;
@@ -26,9 +36,50 @@
 	// Account mode
 	let accounts: Array<{ id: number; code: string; name: string }> = [];
 	let selectedAccountId: number | '' = '';
-	let accountData: any = null;
+	let rawAccountData: any = null;
 	let accountPage = 0;
 	const accountPerPage = 50;
+
+	// Account-view conversion (base → display) as of the period end.
+	$: baseCcy = rawAccountData?.currency || $companyCurrency || 'EUR';
+	$: converting = !!($displayCurrency && baseCcy && $displayCurrency !== baseCcy);
+	$: fx = converting && rawAccountData
+		? convertAmount(1, baseCcy, $displayCurrency, $exchangeRates ?? [], dateTo || undefined)
+		: null;
+	$: factor = converting ? (fx?.hasRate ? fx.rate : null) : 1;
+	$: noRate = converting && !fx?.hasRate;
+	$: displayCcy = converting ? $displayCurrency : baseCcy;
+	$: fxProps = { factor, converting, displayCcy, baseCcy };
+	$: accountData = rawAccountData;
+
+	// Journal view: each entry is in its OWN original currency. Convert a line amount
+	// from the entry's currency to the display currency (returns the numeric value;
+	// falls back to the original when not converting / no rate). Store args are passed
+	// so the {@const}/reactive call sites recompute when the selection changes.
+	function jconv(amount: any, entryCcy: string, date: string, disp: string, rates: any[]): { v: number; hasRate: boolean } {
+		const n = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
+		const cur = (entryCcy || '').toUpperCase();
+		if (!disp || !cur || disp === cur) return { v: isNaN(n) ? 0 : n, hasRate: true };
+		const r = convertAmount(isNaN(n) ? 0 : n, cur, disp, rates ?? [], date);
+		return { v: r.hasRate ? r.converted : (isNaN(n) ? 0 : n), hasRate: r.hasRate };
+	}
+	// Per-line base→display factor for a journal entry's currency (feeds <ReportAmount>).
+	function jfactor(entryCcy: string, date: string, disp: string, rates: any[]): number | null {
+		const cur = (entryCcy || '').toUpperCase();
+		if (!disp || !cur || disp === cur) return 1;
+		const r = convertAmount(1, cur, disp, rates ?? [], date);
+		return r.hasRate ? r.rate : null;
+	}
+	// Journal totals in the display currency = sum of per-line converted amounts.
+	$: journalDispDebit = journalEntries.reduce(
+		(s, e) => s + e.lines.reduce((ls: number, l: any) => ls + jconv(l.debit, e.currency, e.transaction_date, $displayCurrency, $exchangeRates ?? []).v, 0),
+		0
+	);
+	$: journalDispCredit = journalEntries.reduce(
+		(s, e) => s + e.lines.reduce((ls: number, l: any) => ls + jconv(l.credit, e.currency, e.transaction_date, $displayCurrency, $exchangeRates ?? []).v, 0),
+		0
+	);
+	$: journalConverting = !!$displayCurrency && journalEntries.some((e) => (e.currency || '').toUpperCase() !== $displayCurrency.toUpperCase());
 
 	const loadAccounts = async () => {
 		try {
@@ -54,7 +105,7 @@
 				journalTotalCredit = parseFloat(res.total_credit ?? 0);
 			} else {
 				if (!selectedAccountId) { loading = false; return; }
-				accountData = await getGeneralLedger({
+				rawAccountData = await getGeneralLedger({
 					company_id: companyId,
 					account_id: selectedAccountId as number,
 					date_from: dateFrom || undefined,
@@ -168,8 +219,8 @@
 									<td class="px-2 py-1.5">{lineIdx === 0 ? entry.currency : ''}</td>
 									<td class="px-2 py-1.5 text-right font-mono">{lineIdx === 0 ? fmtRate(entry.exchange_rate) : ''}</td>
 									<td class="px-2 py-1.5 text-right font-mono">{origAmount(line)}</td>
-									<td class="px-2 py-1.5 text-right font-mono">{fmt(line.debit)}</td>
-									<td class="px-2 py-1.5 text-right font-mono">{fmt(line.credit)}</td>
+									<td class="px-2 py-1.5 text-right font-mono">{#key $displayCurrency}<ReportAmount value={line.debit} factor={jfactor(entry.currency, entry.transaction_date, $displayCurrency, $exchangeRates ?? [])} converting={!!$displayCurrency && (entry.currency || '').toUpperCase() !== $displayCurrency.toUpperCase()} displayCcy={$displayCurrency} baseCcy={entry.currency} />{/key}</td>
+									<td class="px-2 py-1.5 text-right font-mono">{#key $displayCurrency}<ReportAmount value={line.credit} factor={jfactor(entry.currency, entry.transaction_date, $displayCurrency, $exchangeRates ?? [])} converting={!!$displayCurrency && (entry.currency || '').toUpperCase() !== $displayCurrency.toUpperCase()} displayCcy={$displayCurrency} baseCcy={entry.currency} />{/key}</td>
 								</tr>
 							{/each}
 						{/each}
@@ -178,8 +229,8 @@
 				<tfoot class="font-medium bg-gray-50 dark:bg-gray-850/50 text-gray-800 dark:text-gray-200">
 					<tr class="border-t-2 border-gray-200 dark:border-gray-700">
 						<td class="px-2 py-2" colspan="8">{$i18n.t('Total')}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(journalTotalDebit)}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(journalTotalCredit)}</td>
+						<td class="px-2 py-2 text-right font-mono">{#key $displayCurrency}{#if journalConverting}{fmt(journalDispDebit)} <span class="text-[9px] text-gray-400">{$displayCurrency}</span>{:else}{fmt(journalTotalDebit)}{/if}{/key}</td>
+						<td class="px-2 py-2 text-right font-mono">{#key $displayCurrency}{#if journalConverting}{fmt(journalDispCredit)} <span class="text-[9px] text-gray-400">{$displayCurrency}</span>{:else}{fmt(journalTotalCredit)}{/if}{/key}</td>
 					</tr>
 				</tfoot>
 			</table>
@@ -198,7 +249,7 @@
 		<div class="text-sm font-medium dark:text-gray-200">
 			{accountData.account_code} — {accountData.account_name}
 			{#if hasSubAccounts}<span class="text-[10px] text-gray-400 ml-1">({$i18n.t('incl. sub-accounts')})</span>{/if}
-			<span class="text-xs text-gray-500 ml-2">{$i18n.t('Opening')}: {fmt(accountData.opening_balance)}</span>
+			<span class="text-xs text-gray-500 ml-2">{$i18n.t('Opening')}: <ReportAmount value={accountData.opening_balance} {...fxProps} /></span>{#if accountData.opening_balance_date}<span class="text-[10px] text-gray-400 ml-1">({$i18n.t('as of')} {accountData.opening_balance_date})</span>{/if}{#if displayCcy}<span class="text-[10px] text-gray-400 ml-1">· {displayCcy}</span>{/if}{#if noRate}<span class="text-[10px] text-amber-600 dark:text-amber-400 ml-1">({$i18n.t('no rate for')} {$displayCurrency})</span>{/if}
 		</div>
 
 		<div class="overflow-x-auto bg-white dark:bg-gray-900 rounded-xl border border-gray-100/30 dark:border-gray-850/30">
@@ -228,16 +279,16 @@
 							{/if}
 							<td class="px-2 py-1.5">{#if entry.k4mi_document_id}<K4miDocLink docId={entry.k4mi_document_id} title={$i18n.t('Open in K4mi')}>{entry.reference ?? ''} <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-3 h-3 inline mb-0.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg></K4miDocLink>{:else}{entry.reference ?? ''}{/if}</td>
 							<td class="px-2 py-1.5">{entry.description ?? ''}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(entry.debit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(entry.credit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono font-medium">{fmt(entry.running_balance)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={entry.debit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={entry.credit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono font-medium"><ReportAmount value={entry.running_balance} {...fxProps} /></td>
 						</tr>
 					{/each}
 				</tbody>
 				<tfoot class="font-medium bg-gray-50 dark:bg-gray-850/50 text-gray-800 dark:text-gray-200">
 					<tr class="border-t-2 border-gray-200 dark:border-gray-700">
 						<td class="px-2 py-2" colspan="{hasSubAccounts ? 6 : 5}">{$i18n.t('Closing Balance')}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(accountData.closing_balance)}</td>
+						<td class="px-2 py-2 text-right font-mono"><ReportAmount value={accountData.closing_balance} {...fxProps} /></td>
 					</tr>
 				</tfoot>
 			</table>

@@ -9,12 +9,16 @@
 		deleteFixedAsset,
 		generateDepreciation,
 		getAccounts,
-		getPeriods
+		getPeriods,
+		getCompany,
+		updateCompany,
+		downloadAssetImportTemplate
 	} from '$lib/apis/accounting';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
+	import ExcelImportModal from './ExcelImportModal.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -24,6 +28,13 @@
 	let loading = true;
 	let assets: any[] = [];
 	let accounts: any[] = [];
+
+	// Company default fixed-asset accounts (customizable) + Excel import
+	let defaultAssetAccountId: number | '' = '';
+	let defaultDepreciationAccountId: number | '' = '';
+	let defaultExpenseAccountId: number | '' = '';
+	let savingDefaults = false;
+	let showImportModal = false;
 
 	// Create form
 	let showAddForm = false;
@@ -82,21 +93,13 @@
 		return Array.from(seen.values()).sort((a, b) => b.value.localeCompare(a.value));
 	}
 
-	// Account filters
-	$: assetAccounts = accounts.filter((a: any) => {
-		const code = (a.code ?? '').replace(/\./g, '');
-		return code.startsWith('2') && !code.startsWith('28');
-	});
-
-	$: depreciationAccounts = accounts.filter((a: any) => {
-		const code = (a.code ?? '').replace(/\./g, '');
-		return code.startsWith('28');
-	});
-
-	$: expenseAccounts = accounts.filter((a: any) => {
-		const code = (a.code ?? '').replace(/\./g, '');
-		return code.startsWith('681');
-	});
+	// Account filters — by account TYPE so they work across charts (French PCG,
+	// Chinese GAAP, US…) instead of guessing from code prefixes. Asset cost and
+	// accumulated depreciation both live under the "asset" type; the depreciation
+	// charge is an "expense". Accounts missing a type are shown in all lists.
+	$: assetAccounts = accounts.filter((a: any) => !a.account_type || a.account_type === 'asset');
+	$: depreciationAccounts = accounts.filter((a: any) => !a.account_type || a.account_type === 'asset');
+	$: expenseAccounts = accounts.filter((a: any) => !a.account_type || a.account_type === 'expense');
 
 	// ─── Data loading ───────────────────────────────────────────────────────────
 
@@ -113,14 +116,20 @@
 
 	onMount(async () => {
 		try {
-			const [, acctRes, periodRes] = await Promise.all([
+			const [, acctRes, periodRes, companyRes] = await Promise.all([
 				loadAssets(),
 				getAccounts({ company_id: companyId }),
-				getPeriods({ company_id: companyId })
+				getPeriods({ company_id: companyId }),
+				getCompany(companyId)
 			]);
 			accounts = Array.isArray(acctRes) ? acctRes : acctRes?.items ?? acctRes?.accounts ?? [];
 			const periods = periodRes.periods ?? periodRes ?? [];
 			monthOptions = buildMonthOptions(periods);
+
+			defaultAssetAccountId = companyRes?.fixed_asset_account_id ?? '';
+			defaultDepreciationAccountId = companyRes?.accumulated_depreciation_account_id ?? '';
+			defaultExpenseAccountId = companyRes?.depreciation_expense_account_id ?? '';
+			applyDefaultsToForm();
 
 			const now = new Date();
 			const curKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -134,6 +143,48 @@
 			console.error('Failed to load accounts/periods:', err);
 		}
 	});
+
+	// ─── Default accounts + import ───────────────────────────────────────────────
+
+	function applyDefaultsToForm() {
+		if (!newAssetAccountId && defaultAssetAccountId) newAssetAccountId = Number(defaultAssetAccountId);
+		if (!newDepreciationAccountId && defaultDepreciationAccountId)
+			newDepreciationAccountId = Number(defaultDepreciationAccountId);
+		if (!newExpenseAccountId && defaultExpenseAccountId) newExpenseAccountId = Number(defaultExpenseAccountId);
+	}
+
+	const saveDefaults = async () => {
+		savingDefaults = true;
+		try {
+			await updateCompany(companyId, {
+				fixed_asset_account_id: defaultAssetAccountId ? Number(defaultAssetAccountId) : null,
+				accumulated_depreciation_account_id: defaultDepreciationAccountId
+					? Number(defaultDepreciationAccountId)
+					: null,
+				depreciation_expense_account_id: defaultExpenseAccountId ? Number(defaultExpenseAccountId) : null
+			});
+			toast.success($i18n.t('Default fixed-asset accounts saved'));
+			applyDefaultsToForm();
+		} catch (err: any) {
+			const msg = err?.detail ?? err?.message ?? String(err);
+			toast.error($i18n.t('Failed to save default accounts') + ': ' + msg);
+		}
+		savingDefaults = false;
+	};
+
+	const handleAssetsImported = async () => {
+		showImportModal = false;
+		await loadAssets();
+	};
+
+	const handleDownloadTemplate = async () => {
+		try {
+			await downloadAssetImportTemplate();
+		} catch (err: any) {
+			const msg = err?.detail ?? err?.message ?? String(err);
+			toast.error($i18n.t('Failed to download template') + ': ' + msg);
+		}
+	};
 
 	// ─── Create ─────────────────────────────────────────────────────────────────
 
@@ -236,6 +287,13 @@
 	message={$i18n.t('Are you sure you want to delete this fixed asset? This action cannot be undone.')}
 />
 
+<ExcelImportModal
+	bind:show={showImportModal}
+	type="asset"
+	{companyId}
+	on:imported={handleAssetsImported}
+/>
+
 <div class="py-2">
 	<!-- Header -->
 	<div
@@ -253,9 +311,105 @@
 				class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-800 dark:hover:bg-white transition"
 				on:click={() => {
 					showAddForm = !showAddForm;
+					if (showAddForm) applyDefaultsToForm();
 				}}
 			>
 				{showAddForm ? $i18n.t('Cancel') : $i18n.t('Add Asset')}
+			</button>
+		</div>
+	</div>
+
+	<!-- Default accounts + Excel import -->
+	<div
+		class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30 mb-3"
+	>
+		<div class="flex flex-col md:flex-row md:items-center justify-between gap-2 mb-2">
+			<div class="text-sm font-medium dark:text-gray-200">
+				{$i18n.t('Default Fixed-Asset Accounts')}
+			</div>
+			<div class="flex gap-2">
+				<button
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white transition"
+					on:click={handleDownloadTemplate}
+				>
+					{$i18n.t('Download Template')}
+				</button>
+				<button
+					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition"
+					on:click={() => (showImportModal = true)}
+				>
+					{$i18n.t('Import from Excel')}
+				</button>
+			</div>
+		</div>
+		<div class="text-xs text-gray-400 dark:text-gray-500 mb-3">
+			{$i18n.t(
+				'These accounts pre-fill new assets and are used when importing an asset register. Leave blank to choose per asset.'
+			)}
+		</div>
+		<div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+			<div>
+				<label
+					for="default-asset-account"
+					class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1"
+				>
+					{$i18n.t('Asset Account')}
+				</label>
+				<select
+					id="default-asset-account"
+					bind:value={defaultAssetAccountId}
+					class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition"
+				>
+					<option value="">{$i18n.t('Not set')}</option>
+					{#each assetAccounts as acct}
+						<option value={acct.id}>{acct.code} - {acct.name}</option>
+					{/each}
+				</select>
+			</div>
+			<div>
+				<label
+					for="default-dep-account"
+					class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1"
+				>
+					{$i18n.t('Depreciation Account')}
+				</label>
+				<select
+					id="default-dep-account"
+					bind:value={defaultDepreciationAccountId}
+					class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition"
+				>
+					<option value="">{$i18n.t('Not set')}</option>
+					{#each depreciationAccounts as acct}
+						<option value={acct.id}>{acct.code} - {acct.name}</option>
+					{/each}
+				</select>
+			</div>
+			<div>
+				<label
+					for="default-expense-account"
+					class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1"
+				>
+					{$i18n.t('Expense Account')}
+				</label>
+				<select
+					id="default-expense-account"
+					bind:value={defaultExpenseAccountId}
+					class="w-full text-sm rounded-lg px-3 py-2 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden focus:border-blue-500 transition"
+				>
+					<option value="">{$i18n.t('Not set')}</option>
+					{#each expenseAccounts as acct}
+						<option value={acct.id}>{acct.code} - {acct.name}</option>
+					{/each}
+				</select>
+			</div>
+		</div>
+		<div class="mt-3 flex justify-end">
+			<button
+				class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-800 dark:hover:bg-white transition disabled:opacity-50"
+				on:click={saveDefaults}
+				disabled={savingDefaults}
+			>
+				{savingDefaults ? $i18n.t('Saving...') : $i18n.t('Save Defaults')}
 			</button>
 		</div>
 	</div>

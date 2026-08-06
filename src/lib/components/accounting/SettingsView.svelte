@@ -14,11 +14,13 @@
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import ExcelImportModal from '$lib/components/accounting/ExcelImportModal.svelte';
+	import CountryConfigManager from '$lib/components/accounting/CountryConfigManager.svelte';
+	import GlobalExchangeRates from '$lib/components/accounting/GlobalExchangeRates.svelte';
 
 	const i18n = getContext('i18n');
 
 	// Tab state
-	let activeTab: 'chart' | 'period' = 'chart';
+	let activeTab: 'chart' | 'period' | 'countries' | 'rates' = 'chart';
 
 	// Data
 	let chartTemplates: any[] = [];
@@ -249,6 +251,22 @@
 			on:click={() => (activeTab = 'period')}
 		>
 			{$i18n.t('Period Templates')}
+		</button>
+		<button
+			class="px-4 py-2 text-sm font-medium transition border-b-2 {activeTab === 'countries'
+				? 'border-blue-500 text-blue-600 dark:text-blue-400'
+				: 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+			on:click={() => (activeTab = 'countries')}
+		>
+			{$i18n.t('Countries')}
+		</button>
+		<button
+			class="px-4 py-2 text-sm font-medium transition border-b-2 {activeTab === 'rates'
+				? 'border-blue-500 text-blue-600 dark:text-blue-400'
+				: 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'}"
+			on:click={() => (activeTab = 'rates')}
+		>
+			{$i18n.t('Exchange Rates')}
 		</button>
 	</div>
 
@@ -769,5 +787,14 @@
 				{/each}
 			</div>
 		{/if}
+	{/if}
+
+	<!-- Countries Tab -->
+	{#if activeTab === 'countries'}
+		<CountryConfigManager />
+	{/if}
+
+	{#if activeTab === 'rates'}
+		<GlobalExchangeRates />
 	{/if}
 </div>

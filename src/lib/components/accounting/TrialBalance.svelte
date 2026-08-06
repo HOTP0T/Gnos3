@@ -2,13 +2,34 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { getTrialBalance, getPeriods, exportTrialBalance } from '$lib/apis/accounting';
+	import type { Writable } from 'svelte/store';
+	import { convertAmount } from '$lib/utils/currency';
+	import ReportAmount from '$lib/components/accounting/ReportAmount.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
 	export let companyId: number;
 
 	let loading = false;
-	let data: any = null;
+	let rawData: any = null;
+
+	// Display-currency conversion, driven by the company-wide selector. The report
+	// arrives in the company base currency; when a different display currency is
+	// selected we scale every money field by the base→display rate as of `as_of`.
+	const displayCurrency = getContext<Writable<string>>('displayCurrency');
+	const exchangeRates = getContext<Writable<any[]>>('exchangeRates');
+	const companyCurrency = getContext<Writable<string>>('companyCurrency');
+
+	$: baseCcy = rawData?.currency || $companyCurrency || 'EUR';
+	$: converting = !!($displayCurrency && baseCcy && $displayCurrency !== baseCcy);
+	$: fx = converting && rawData
+		? convertAmount(1, baseCcy, $displayCurrency, $exchangeRates ?? [], rawData?.as_of)
+		: null;
+	$: factor = converting ? (fx?.hasRate ? fx.rate : null) : 1;
+	$: noRate = converting && !fx?.hasRate;
+	$: displayCcy = converting ? $displayCurrency : baseCcy;
+	$: fxProps = { factor, converting, displayCcy, baseCcy };
+	$: data = rawData;
 
 	let selectedMonth = '';
 	let monthOptions: Array<{ value: string; label: string; from: string; to: string; fiscalStart: string }> = [];
@@ -80,7 +101,7 @@
 
 		loading = true;
 		try {
-			data = await getTrialBalance({
+			rawData = await getTrialBalance({
 				company_id: companyId,
 				as_of: asOf,
 				period_start: periodStart,
@@ -95,9 +116,6 @@
 		if (n === 0) return '';
 		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 	};
-
-	const sumField = (rows: any[], field: string): number =>
-		rows.reduce((s: number, r: any) => s + (parseFloat(r[field]) || 0), 0);
 
 	$: selectedOpt = monthOptions.find(o => o.value === selectedMonth);
 </script>
@@ -172,9 +190,12 @@
 	{:else if data}
 		<div class="flex items-center gap-2 text-sm">
 			<span class="font-medium dark:text-gray-200">{$i18n.t('Trial Balance')}</span>
+			{#if displayCcy}<span class="text-xs font-medium text-gray-500 dark:text-gray-400">{displayCcy}</span>{/if}
+			{#if noRate}<span class="text-[10px] text-amber-600 dark:text-amber-400" title={$i18n.t('Add a rate in Settings → Exchange Rates')}>({$i18n.t('no rate for')} {$displayCurrency}, {$i18n.t('showing')} {baseCcy})</span>{/if}
 			{#if data.period_label}<span class="text-xs text-gray-500">{$i18n.t('Period')}: {data.period_label}</span>{/if}
 			{#if data.period_start}<span class="text-xs text-gray-500">({data.period_start} — {data.as_of})</span>
 			{:else}<span class="text-xs text-gray-500">{$i18n.t('As of')} {data.as_of}</span>{/if}
+			{#if data.opening_balance_date}<span class="text-xs text-gray-400 dark:text-gray-500">{$i18n.t('Opening as of')} {data.opening_balance_date}</span>{/if}
 			<span class="text-xs font-medium px-2 py-0.5 rounded-lg {data.is_balanced ? 'bg-green-500/20 text-green-700 dark:text-green-300' : 'bg-red-500/20 text-red-700 dark:text-red-300'}">{data.is_balanced ? $i18n.t('Balanced') : $i18n.t('Unbalanced')}</span>
 		</div>
 
@@ -201,14 +222,14 @@
 							{#if data.period_label}<td class="px-2 py-1.5">{data.period_label}</td>{/if}
 							<td class="px-2 py-1.5 font-mono" style="padding-left: {8 + (row.level || 0) * 16}px">{row.account_code}</td>
 							<td class="px-2 py-1.5">{row.account_name}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.opening_debit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.opening_credit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.movement_debit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.movement_credit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.accumulated_debit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(row.accumulated_credit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono {row.ending_debit ? 'text-blue-700 dark:text-blue-400' : ''}">{fmt(row.ending_debit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono {row.ending_credit ? 'text-red-700 dark:text-red-400' : ''}">{fmt(row.ending_credit)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={row.opening_debit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={row.opening_credit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={row.movement_debit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={row.movement_credit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={row.accumulated_debit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={row.accumulated_credit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono {row.ending_debit ? 'text-blue-700 dark:text-blue-400' : ''}"><ReportAmount value={row.ending_debit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono {row.ending_credit ? 'text-red-700 dark:text-red-400' : ''}"><ReportAmount value={row.ending_credit} {...fxProps} /></td>
 						</tr>
 					{/each}
 				</tbody>
@@ -216,14 +237,14 @@
 					<tr class="border-t-2 border-gray-200 dark:border-gray-700">
 						{#if data.period_label}<td class="px-2 py-2"></td>{/if}
 						<td class="px-2 py-2" colspan="2">{$i18n.t('Total')}</td>
-												<td class="px-2 py-2 text-right font-mono">{fmt(sumField(data.rows, 'opening_debit'))}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(sumField(data.rows, 'opening_credit'))}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(sumField(data.rows, 'movement_debit'))}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(sumField(data.rows, 'movement_credit'))}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(sumField(data.rows, 'accumulated_debit'))}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(sumField(data.rows, 'accumulated_credit'))}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(sumField(data.rows, 'ending_debit'))}</td>
-						<td class="px-2 py-2 text-right font-mono">{fmt(sumField(data.rows, 'ending_credit'))}</td>
+												<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_opening_debit} {...fxProps} /></td>
+						<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_opening_credit} {...fxProps} /></td>
+						<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_movement_debit} {...fxProps} /></td>
+						<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_movement_credit} {...fxProps} /></td>
+						<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_accumulated_debit} {...fxProps} /></td>
+						<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_accumulated_credit} {...fxProps} /></td>
+						<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_debit} {...fxProps} /></td>
+						<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_credit} {...fxProps} /></td>
 					</tr>
 				</tfoot>
 			</table>

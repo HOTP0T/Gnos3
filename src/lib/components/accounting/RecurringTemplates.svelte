@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
-	import { getRecurringTemplates, createRecurringTemplate, deleteRecurringTemplate, generateRecurringNow, getAccounts } from '$lib/apis/accounting';
+	import { getRecurringTemplates, createRecurringTemplate, updateRecurringTemplate, deleteRecurringTemplate, generateRecurringNow, previewRecurring, getAccounts } from '$lib/apis/accounting';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
@@ -11,6 +11,7 @@
 	let accounts: any[] = [];
 	let loading = true;
 	let showForm = false;
+	let editingId: number | null = null;
 
 	// Form state
 	let form = {
@@ -48,26 +49,72 @@
 	const addLine = () => { form.lines = [...form.lines, { account_code: '', debit: 0, credit: 0, description: '' }]; };
 	const removeLine = (i: number) => { form.lines = form.lines.filter((_, idx) => idx !== i); };
 
-	const handleCreate = async () => {
+	const resetForm = () => {
+		editingId = null;
+		form = {
+			name: '', frequency: 'monthly', day_of_month: 1,
+			start_date: new Date().toISOString().slice(0, 10), end_date: '',
+			currency: 'USD', reference_prefix: '', description: '', auto_post: false,
+			lines: [
+				{ account_code: '', debit: 0, credit: 0, description: '' },
+				{ account_code: '', debit: 0, credit: 0, description: '' },
+			],
+		};
+	};
+
+	const handleEdit = (tmpl: any) => {
+		editingId = tmpl.id;
+		const lines = (tmpl.lines_template ?? []).map((l: any) => ({
+			account_code: l.account_code ?? '', debit: l.debit ?? 0, credit: l.credit ?? 0, description: l.description ?? ''
+		}));
+		while (lines.length < 2) lines.push({ account_code: '', debit: 0, credit: 0, description: '' });
+		form = {
+			name: tmpl.name ?? '', frequency: tmpl.frequency ?? 'monthly', day_of_month: tmpl.day_of_month ?? 1,
+			start_date: tmpl.start_date ?? new Date().toISOString().slice(0, 10), end_date: tmpl.end_date ?? '',
+			currency: tmpl.currency ?? 'USD', reference_prefix: tmpl.reference_prefix ?? '',
+			description: tmpl.description ?? '', auto_post: !!tmpl.auto_post, lines,
+		};
+		showForm = true;
+	};
+
+	const handleSubmit = async () => {
 		if (!form.name) { toast.error($i18n.t('Name is required')); return; }
 		if (form.lines.length < 2) { toast.error($i18n.t('At least 2 lines required')); return; }
+		const payload = {
+			name: form.name,
+			frequency: form.frequency,
+			day_of_month: form.day_of_month,
+			start_date: form.start_date,
+			end_date: form.end_date || undefined,
+			currency: form.currency,
+			reference_prefix: form.reference_prefix || undefined,
+			description: form.description || undefined,
+			auto_post: form.auto_post,
+			transaction_type: 'others',
+			lines_template: form.lines.filter(l => l.account_code),
+		};
 		try {
-			await createRecurringTemplate(companyId, {
-				name: form.name,
-				frequency: form.frequency,
-				day_of_month: form.day_of_month,
-				start_date: form.start_date,
-				end_date: form.end_date || undefined,
-				currency: form.currency,
-				reference_prefix: form.reference_prefix || undefined,
-				description: form.description || undefined,
-				auto_post: form.auto_post,
-				transaction_type: 'others',
-				lines_template: form.lines.filter(l => l.account_code),
-			});
-			toast.success($i18n.t('Template created'));
+			if (editingId) {
+				await updateRecurringTemplate(editingId, payload);
+				toast.success($i18n.t('Template updated'));
+			} else {
+				await createRecurringTemplate(companyId, payload);
+				toast.success($i18n.t('Template created'));
+			}
 			showForm = false;
+			resetForm();
 			await load();
+		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
+	};
+
+	const handlePreview = async (id: number) => {
+		try {
+			const p = await previewRecurring(id);
+			const lines = p?.lines ?? [];
+			const summary = lines
+				.map((l: any) => `${l.account_code} ${l.debit ? 'DR ' + l.debit : 'CR ' + l.credit}`)
+				.join(' · ');
+			toast.info(`${$i18n.t('Next')}: ${p?.transaction_date ?? ''} — ${summary || $i18n.t('no lines')}`);
 		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
 	};
 
@@ -96,7 +143,7 @@
 <div class="space-y-3">
 	<div class="flex items-center justify-between">
 		<h3 class="text-sm font-semibold dark:text-gray-200">{$i18n.t('Recurring Transactions')}</h3>
-		<button class="px-3 py-1 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition" on:click={() => (showForm = !showForm)}>
+		<button class="px-3 py-1 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition" on:click={() => { if (showForm) { showForm = false; resetForm(); } else { resetForm(); showForm = true; } }}>
 			{showForm ? $i18n.t('Cancel') : $i18n.t('New Template')}
 		</button>
 	</div>
@@ -157,7 +204,7 @@
 					<input type="checkbox" bind:checked={form.auto_post} class="rounded" />
 					{$i18n.t('Auto-post generated entries')}
 				</label>
-				<button class="px-4 py-1.5 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition" on:click={handleCreate}>{$i18n.t('Create Template')}</button>
+				<button class="px-4 py-1.5 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition" on:click={handleSubmit}>{editingId ? $i18n.t('Save Changes') : $i18n.t('Create Template')}</button>
 			</div>
 		</div>
 	{/if}
@@ -177,7 +224,9 @@
 							{#if !tmpl.is_active}<span class="ml-1 text-[10px] px-1.5 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{$i18n.t('Inactive')}</span>{/if}
 						</div>
 						<div class="flex gap-2">
+							<button class="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" on:click={() => handlePreview(tmpl.id)}>{$i18n.t('Preview')}</button>
 							<button class="text-xs text-blue-600 hover:text-blue-700" on:click={() => handleGenerate(tmpl.id)}>{$i18n.t('Generate Now')}</button>
+							<button class="text-xs text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200" on:click={() => handleEdit(tmpl)}>{$i18n.t('Edit')}</button>
 							<button class="text-xs text-red-500 hover:text-red-700" on:click={() => handleDelete(tmpl.id)}>{$i18n.t('Delete')}</button>
 						</div>
 					</div>

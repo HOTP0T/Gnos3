@@ -481,6 +481,11 @@ def get_verified_user(user=Depends(get_current_user)):
 # user-mgmt, group-mgmt, and the per-company permissions UI endpoints.
 ADMIN_TIER_ROLES: set[str] = {'admin', 'superadmin'}
 
+# The complete set of assignable role values. Anything outside this set would
+# silently break tier comparisons (which match exact lowercase strings), so the
+# user create/update endpoints reject unknown roles up front.
+VALID_USER_ROLES: set[str] = {'pending', 'user', 'admin', 'superadmin'}
+
 
 def get_admin_user(user=Depends(get_current_user)):
     if user.role != 'superadmin':

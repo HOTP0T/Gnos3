@@ -2,15 +2,37 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { getProfitLoss, getPeriods, getCompany, exportProfitLoss } from '$lib/apis/accounting';
+	import type { Writable } from 'svelte/store';
+	import { convertAmount } from '$lib/utils/currency';
+	import ReportAmount from '$lib/components/accounting/ReportAmount.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
 	export let companyId: number;
 
 	let loading = false;
-	let data: any = null;
+	let rawData: any = null;
 	let companyCountry: string = '';
 	let isFrench = false;
+
+	// Display-currency conversion (company-wide selector). P&L arrives in the base
+	// currency; scale money fields by the base→display rate as of the period end.
+	const displayCurrency = getContext<Writable<string>>('displayCurrency');
+	const exchangeRates = getContext<Writable<any[]>>('exchangeRates');
+	const companyCurrency = getContext<Writable<string>>('companyCurrency');
+
+	$: baseCcy = rawData?.currency || $companyCurrency || 'EUR';
+	$: converting = !!($displayCurrency && baseCcy && $displayCurrency !== baseCcy);
+	$: fx = converting && rawData
+		? convertAmount(1, baseCcy, $displayCurrency, $exchangeRates ?? [], rawData?.date_to)
+		: null;
+	$: factor = converting ? (fx?.hasRate ? fx.rate : null) : 1;
+	$: noRate = converting && !fx?.hasRate;
+	$: displayCcy = converting ? $displayCurrency : baseCcy;
+	// English number format uses '—' for zero (2 dp); French format is blank + 0 dp, fr-FR locale.
+	$: fxProps = { factor, converting, displayCcy, baseCcy, zeroText: '—' };
+	$: fxPropsFr = { factor, converting, displayCcy, baseCcy, zeroText: '', minFrac: 0, maxFrac: 0, locale: 'fr-FR' };
+	$: data = rawData;
 
 	let selectedMonth = '';
 	let monthOptions: Array<{ value: string; label: string; from: string; to: string; fiscalStart: string }> = [];
@@ -69,7 +91,7 @@
 		if (!opt) { toast.error($i18n.t('Please select a period')); return; }
 		loading = true;
 		try {
-			data = await getProfitLoss({
+			rawData = await getProfitLoss({
 				company_id: companyId,
 				date_from: opt.from,
 				date_to: opt.to,
@@ -140,8 +162,10 @@
 	}
 
 	function buildFrenchStructured(d: any) {
-		const allRevenue = d.revenue ?? [];
-		const allExpenses = d.expenses ?? [];
+		// Leaf accounts only — parent rows carry rolled-up subtotals from the
+		// backend, so including them in category sums would double-count.
+		const allRevenue = (d.revenue ?? []).filter((e: any) => !e.is_parent);
+		const allExpenses = (d.expenses ?? []).filter((e: any) => !e.is_parent);
 
 		const sumAmt = (items: any[]) => items.reduce((s: number, e: any) => s + (parseFloat(e.amount) || 0), 0);
 		const sumYtd = (items: any[]) => items.reduce((s: number, e: any) => s + (parseFloat(e.ytd_amount) || 0), 0);
@@ -232,8 +256,10 @@
 	$: structured = data ? (isFrench ? buildFrenchStructured(data) : buildStructured(data)) : null;
 
 	function buildStructured(d: any) {
-		const revenue = d.revenue ?? [];
-		const expenses = d.expenses ?? [];
+		// Leaf accounts only — parent rows carry rolled-up subtotals from the
+		// backend, so summing them with their children would double-count.
+		const revenue = (d.revenue ?? []).filter((e: any) => !e.is_parent);
+		const expenses = (d.expenses ?? []).filter((e: any) => !e.is_parent);
 
 		const costs = expenses.filter((e: any) => isCostAccount(e.account_code, e.account_name));
 		const taxes = expenses.filter((e: any) => isTaxSurcharge(e.account_code, e.account_name));
@@ -248,7 +274,7 @@
 		const sumYtd = (items: any[]) => items.reduce((s: number, e: any) => s + (parseFloat(e.ytd_amount) || 0), 0);
 
 		const totalRevenue = parseFloat(d.total_revenue) || 0;
-		const totalRevenueYtd = sumYtd(revenue);
+		const totalRevenueYtd = parseFloat(d.total_revenue_ytd) || 0;
 		const totalCosts = sumAmt(costs);
 		const totalCostsYtd = sumYtd(costs);
 		const totalTaxes = sumAmt(taxes);
@@ -262,7 +288,7 @@
 		const operatingProfit = grossProfit - totalOperating - totalFinancial;
 		const operatingProfitYtd = grossProfitYtd - totalOperatingYtd - totalFinancialYtd;
 		const netIncome = parseFloat(d.net_income) || 0;
-		const netIncomeYtd = totalRevenueYtd - sumYtd(expenses);
+		const netIncomeYtd = parseFloat(d.net_income_ytd) || 0;
 
 		return {
 			revenue, costs, taxes, operating, financial,
@@ -343,6 +369,7 @@
 		<div class="flex justify-center my-10"><Spinner className="size-5" /></div>
 	{:else if structured}
 		{@const _ = resetLines()}
+		{#if displayCcy}<div class="text-[11px] text-gray-400 dark:text-gray-500 px-0.5">{$i18n.t('Currency')}: {displayCcy}{#if noRate} <span class="text-amber-600 dark:text-amber-400">({$i18n.t('no rate for')} {$displayCurrency}, {$i18n.t('showing')} {baseCcy})</span>{/if}</div>{/if}
 
 		{#if isFrench}
 			<!-- ========== FRENCH FORMAT: Compte de Résultat (HACANTHE) ========== -->
@@ -374,8 +401,8 @@
 								{$i18n.t("Produits d'exploitation")}
 							</td>
 							{#if collapsedSections.has('prodExpl')}
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalOpRevenue)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalOpRevenueYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOpRevenue} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOpRevenueYtd} {...fxPropsFr} /></td>
 							{:else}
 								<td class="px-2 py-1.5"></td>
 								<td class="px-2 py-1.5"></td>
@@ -385,15 +412,15 @@
 							{#each structured.operatingRevenue as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 									<td class="px-3 py-1" style="padding-left: {20 + item.level * 16}px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 							<!-- Subtotal -->
 							<tr class="text-green-700 dark:text-green-400 font-bold italic">
 								<td class="px-3 py-1.5">{$i18n.t("PRODUITS D'EXPLOITATION")}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalOpRevenue)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalOpRevenueYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOpRevenue} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOpRevenueYtd} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
@@ -407,8 +434,8 @@
 								{$i18n.t("Charges d'exploitation")}
 							</td>
 							{#if collapsedSections.has('charExpl')}
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalOpExpenses)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalOpExpensesYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOpExpenses} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOpExpensesYtd} {...fxPropsFr} /></td>
 							{:else}
 								<td class="px-2 py-1.5"></td>
 								<td class="px-2 py-1.5"></td>
@@ -418,23 +445,23 @@
 							{#each structured.operatingExpenses as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 									<td class="px-3 py-1" style="padding-left: {20 + item.level * 16}px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 							<!-- Subtotal -->
 							<tr class="text-green-700 dark:text-green-400 font-bold italic">
 								<td class="px-3 py-1.5">{$i18n.t("CHARGES D'EXPLOITATION")}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalOpExpenses)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalOpExpensesYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOpExpenses} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOpExpensesYtd} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
 						<!-- ===== 3. RÉSULTAT D'EXPLOITATION ===== -->
 						<tr class="bg-green-50/50 dark:bg-green-900/15 font-bold text-green-700 dark:text-green-400">
 							<td class="px-3 py-1.5">{$i18n.t("RÉSULTAT D'EXPLOITATION")}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.resultatExploitation)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.resultatExploitationYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.resultatExploitation} {...fxPropsFr} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.resultatExploitationYtd} {...fxPropsFr} /></td>
 						</tr>
 
 						<!-- ===== 4. Produits financiers ===== -->
@@ -447,8 +474,8 @@
 								{$i18n.t('Produits financiers')}
 							</td>
 							{#if collapsedSections.has('prodFin')}
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalFinRevenue)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalFinRevenueYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinRevenue} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinRevenueYtd} {...fxPropsFr} /></td>
 							{:else}
 								<td class="px-2 py-1.5"></td>
 								<td class="px-2 py-1.5"></td>
@@ -458,14 +485,14 @@
 							{#each structured.financialRevenue as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 									<td class="px-3 py-1" style="padding-left: {20 + item.level * 16}px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 							<tr class="text-green-700 dark:text-green-400 font-bold italic">
 								<td class="px-3 py-1.5">{$i18n.t('PRODUITS FINANCIERS')}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalFinRevenue)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalFinRevenueYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinRevenue} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinRevenueYtd} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
@@ -479,8 +506,8 @@
 								{$i18n.t('Charges financières')}
 							</td>
 							{#if collapsedSections.has('charFin')}
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalFinExpenses)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalFinExpensesYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinExpenses} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinExpensesYtd} {...fxPropsFr} /></td>
 							{:else}
 								<td class="px-2 py-1.5"></td>
 								<td class="px-2 py-1.5"></td>
@@ -490,29 +517,29 @@
 							{#each structured.financialExpenses as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 									<td class="px-3 py-1" style="padding-left: {20 + item.level * 16}px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 							<tr class="text-green-700 dark:text-green-400 font-bold italic">
 								<td class="px-3 py-1.5">{$i18n.t('CHARGES FINANCIÈRES')}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalFinExpenses)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalFinExpensesYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinExpenses} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinExpensesYtd} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
 						<!-- ===== 6. RÉSULTAT FINANCIER ===== -->
 						<tr class="bg-green-50/50 dark:bg-green-900/15 font-bold text-green-700 dark:text-green-400">
 							<td class="px-3 py-1.5">{$i18n.t('RÉSULTAT FINANCIER')}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.resultatFinancier)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.resultatFinancierYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.resultatFinancier} {...fxPropsFr} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.resultatFinancierYtd} {...fxPropsFr} /></td>
 						</tr>
 
 						<!-- ===== 7. RÉSULTAT COURANT AVANT IMPÔTS ===== -->
 						<tr class="bg-green-50/50 dark:bg-green-900/15 font-bold text-green-700 dark:text-green-400">
 							<td class="px-3 py-1.5">{$i18n.t('RÉSULTAT COURANT AVANT IMPÔTS')}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.resultatCourant)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.resultatCourantYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.resultatCourant} {...fxPropsFr} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.resultatCourantYtd} {...fxPropsFr} /></td>
 						</tr>
 
 						<!-- ===== 8. Produits exceptionnels ===== -->
@@ -525,8 +552,8 @@
 								{$i18n.t('Produits exceptionnels')}
 							</td>
 							{#if collapsedSections.has('prodExc')}
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalExcRevenue)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalExcRevenueYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalExcRevenue} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalExcRevenueYtd} {...fxPropsFr} /></td>
 							{:else}
 								<td class="px-2 py-1.5"></td>
 								<td class="px-2 py-1.5"></td>
@@ -536,14 +563,14 @@
 							{#each structured.exceptionalRevenue as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 									<td class="px-3 py-1" style="padding-left: {20 + item.level * 16}px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 							<tr class="text-green-700 dark:text-green-400 font-bold italic">
 								<td class="px-3 py-1.5">{$i18n.t('PRODUITS EXCEPTIONNELS')}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalExcRevenue)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalExcRevenueYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalExcRevenue} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalExcRevenueYtd} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
@@ -557,8 +584,8 @@
 								{$i18n.t('Charges exceptionnelles')}
 							</td>
 							{#if collapsedSections.has('charExc')}
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalExcExpenses)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalExcExpensesYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalExcExpenses} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalExcExpensesYtd} {...fxPropsFr} /></td>
 							{:else}
 								<td class="px-2 py-1.5"></td>
 								<td class="px-2 py-1.5"></td>
@@ -568,30 +595,30 @@
 							{#each structured.exceptionalExpenses as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 									<td class="px-3 py-1" style="padding-left: {20 + item.level * 16}px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 							<tr class="text-green-700 dark:text-green-400 font-bold italic">
 								<td class="px-3 py-1.5">{$i18n.t('CHARGES EXCEPTIONNELLES')}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalExcExpenses)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalExcExpensesYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalExcExpenses} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalExcExpensesYtd} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
 						<!-- ===== 10. RÉSULTAT EXCEPTIONNEL ===== -->
 						<tr class="bg-green-50/50 dark:bg-green-900/15 font-bold text-green-700 dark:text-green-400">
 							<td class="px-3 py-1.5">{$i18n.t('RÉSULTAT EXCEPTIONNEL')}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.resultatExceptionnel)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.resultatExceptionnelYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.resultatExceptionnel} {...fxPropsFr} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.resultatExceptionnelYtd} {...fxPropsFr} /></td>
 						</tr>
 
 						<!-- ===== 11. Participation & Impôts ===== -->
 						{#each structured.incomeTax as item}
 							<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 								<td class="px-3 py-1">{item.account_name}</td>
-								<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-								<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+								<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+								<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 							</tr>
 						{/each}
 
@@ -600,8 +627,8 @@
 							{#each structured.uncategorizedRevenue as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30 text-gray-500">
 									<td class="px-3 py-1">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 						{/if}
@@ -609,8 +636,8 @@
 							{#each structured.uncategorizedExpenses as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30 text-gray-500">
 									<td class="px-3 py-1">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 						{/if}
@@ -618,15 +645,15 @@
 						<!-- ===== 12. TOTAL DES PRODUITS ===== -->
 						<tr class="border-t-2 border-gray-300 dark:border-gray-600 text-green-700 dark:text-green-400 font-bold italic">
 							<td class="px-3 py-1.5">{$i18n.t('TOTAL DES PRODUITS')}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalProduits)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalProduitsYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalProduits} {...fxPropsFr} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalProduitsYtd} {...fxPropsFr} /></td>
 						</tr>
 
 						<!-- ===== 13. TOTAL DES CHARGES ===== -->
 						<tr class="text-green-700 dark:text-green-400 font-bold italic">
 							<td class="px-3 py-1.5">{$i18n.t('TOTAL DES CHARGES')}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalCharges)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmtFr(structured.totalChargesYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalCharges} {...fxPropsFr} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalChargesYtd} {...fxPropsFr} /></td>
 						</tr>
 					</tbody>
 
@@ -634,8 +661,8 @@
 					<tfoot>
 						<tr class="border-t-2 border-gray-300 dark:border-gray-600 bg-green-600/20 font-bold text-green-700 dark:text-green-400 text-sm">
 							<td class="px-3 py-2.5">{$i18n.t('BÉNÉFICE OU PERTE (Total des produits - Total des charges)')}</td>
-							<td class="px-2 py-2.5 text-right font-mono">{fmtFr(structured.netIncome)}</td>
-							<td class="px-2 py-2.5 text-right font-mono">{fmtFr(structured.netIncomeYtd)}</td>
+							<td class="px-2 py-2.5 text-right font-mono"><ReportAmount value={structured.netIncome} {...fxPropsFr} /></td>
+							<td class="px-2 py-2.5 text-right font-mono"><ReportAmount value={structured.netIncomeYtd} {...fxPropsFr} /></td>
 						</tr>
 					</tfoot>
 				</table>
@@ -664,15 +691,15 @@
 						<tr class="font-semibold bg-green-50/30 dark:bg-green-900/10">
 							<td class="px-3 py-1.5">{$i18n.t('Revenue')}</td>
 							<td class="px-2 py-1.5 text-center w-10">{nextLine()}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalRevenue)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalRevenueYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalRevenue} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalRevenueYtd} {...fxProps} /></td>
 						</tr>
 						{#each structured.revenue as item}
 							<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 								<td class="px-3 py-1" style="padding-left: {20 + item.level * 16}px">{item.account_name}</td>
 								<td class="px-2 py-1 text-center text-gray-400">{nextLine()}</td>
-								<td class="px-2 py-1 text-right font-mono">{fmt(item.amount)}</td>
-								<td class="px-2 py-1 text-right font-mono">{fmt(item.ytd_amount)}</td>
+								<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxProps} /></td>
+								<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxProps} /></td>
 							</tr>
 						{/each}
 
@@ -681,15 +708,15 @@
 							<tr class="text-gray-600 dark:text-gray-400">
 								<td class="px-3 py-1.5 italic">{$i18n.t('Less: Cost of sales')}</td>
 								<td class="px-2 py-1.5 text-center">{nextLine()}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalCosts)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalCostsYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalCosts} {...fxProps} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalCostsYtd} {...fxProps} /></td>
 							</tr>
 							{#each structured.costs as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 									<td class="px-3 py-1" style="padding-left: {28 + item.level * 16}px">{item.account_name}</td>
 									<td class="px-2 py-1 text-center text-gray-400">{nextLine()}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxProps} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxProps} /></td>
 								</tr>
 							{/each}
 						{/if}
@@ -699,8 +726,8 @@
 							<tr class="text-gray-600 dark:text-gray-400">
 								<td class="px-3 py-1.5 italic">{$i18n.t('Less: Taxes and surcharges')}</td>
 								<td class="px-2 py-1.5 text-center">{nextLine()}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalTaxes)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalTaxesYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalTaxes} {...fxProps} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalTaxesYtd} {...fxProps} /></td>
 							</tr>
 						{/if}
 
@@ -708,8 +735,8 @@
 						<tr class="font-semibold border-t-2 border-gray-200 dark:border-gray-700 bg-blue-50/30 dark:bg-blue-900/10">
 							<td class="px-3 py-1.5">{$i18n.t('Gross Profit')}</td>
 							<td class="px-2 py-1.5 text-center">{nextLine()}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.grossProfit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.grossProfitYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.grossProfit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.grossProfitYtd} {...fxProps} /></td>
 						</tr>
 
 						<!-- Operating expenses -->
@@ -717,15 +744,15 @@
 							<tr class="text-gray-600 dark:text-gray-400">
 								<td class="px-3 py-1.5 italic">{$i18n.t('Less: Operating expenses')}</td>
 								<td class="px-2 py-1.5 text-center">{nextLine()}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalOperating)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalOperatingYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOperating} {...fxProps} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalOperatingYtd} {...fxProps} /></td>
 							</tr>
 							{#each structured.operating as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
 									<td class="px-3 py-1" style="padding-left: {28 + item.level * 16}px">{item.account_name}</td>
 									<td class="px-2 py-1 text-center text-gray-400">{nextLine()}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(item.amount)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(item.ytd_amount)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.amount} {...fxProps} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.ytd_amount} {...fxProps} /></td>
 								</tr>
 							{/each}
 						{/if}
@@ -735,8 +762,8 @@
 							<tr class="text-gray-600 dark:text-gray-400">
 								<td class="px-3 py-1.5 italic">{$i18n.t('Less: Financial expenses')}</td>
 								<td class="px-2 py-1.5 text-center">{nextLine()}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalFinancial)}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.totalFinancialYtd)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinancial} {...fxProps} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.totalFinancialYtd} {...fxProps} /></td>
 							</tr>
 						{/if}
 
@@ -744,15 +771,15 @@
 						<tr class="font-semibold border-t-2 border-gray-200 dark:border-gray-700 bg-blue-50/30 dark:bg-blue-900/10">
 							<td class="px-3 py-1.5">{$i18n.t('Operating Profit')}</td>
 							<td class="px-2 py-1.5 text-center">{nextLine()}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.operatingProfit)}</td>
-							<td class="px-2 py-1.5 text-right font-mono">{fmt(structured.operatingProfitYtd)}</td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.operatingProfit} {...fxProps} /></td>
+							<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={structured.operatingProfitYtd} {...fxProps} /></td>
 						</tr>
 					</tbody>
 					<tfoot class="font-bold text-sm {structured.netIncome >= 0 ? 'bg-green-50/50 dark:bg-green-900/15' : 'bg-red-50/50 dark:bg-red-900/15'}">
 						<tr class="border-t-2 border-gray-300 dark:border-gray-600">
 							<td class="px-3 py-2.5" colspan="2">{$i18n.t('Net Income')}</td>
-							<td class="px-2 py-2.5 text-right font-mono {structured.netIncome >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}">{fmt(structured.netIncome)}</td>
-							<td class="px-2 py-2.5 text-right font-mono {structured.netIncomeYtd >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}">{fmt(structured.netIncomeYtd)}</td>
+							<td class="px-2 py-2.5 text-right font-mono {structured.netIncome >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}"><ReportAmount value={structured.netIncome} {...fxProps} /></td>
+							<td class="px-2 py-2.5 text-right font-mono {structured.netIncomeYtd >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}"><ReportAmount value={structured.netIncomeYtd} {...fxProps} /></td>
 						</tr>
 					</tfoot>
 				</table>

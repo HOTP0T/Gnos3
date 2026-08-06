@@ -7,6 +7,7 @@
 		updateBusinessCard,
 		reprocessBusinessCard,
 		syncBusinessCardFromK4mi,
+		markBusinessCardReviewed,
 		getBusinessCardPreviewUrl,
 		type BusinessCard
 	} from '$lib/apis/business-cards';
@@ -29,6 +30,7 @@
 	let saving = false;
 	let syncing = false;
 	let reprocessing = false;
+	let marking = false;
 
 	$: dirty = Object.keys(draft).length > 0;
 
@@ -117,6 +119,25 @@
 			toast.error(`${err}`);
 		} finally {
 			syncing = false;
+		}
+	};
+
+	const handleMarkReviewed = async () => {
+		marking = true;
+		try {
+			// Save any pending edits first so "reviewed" reflects what's on screen.
+			if (dirty) {
+				const saved = await updateBusinessCard(localStorage.token, card.id, draft);
+				draft = {};
+				card = saved;
+			}
+			const updated = await markBusinessCardReviewed(localStorage.token, card.id);
+			toast.success($i18n.t('Marked as reviewed'));
+			dispatch('updated', updated);
+		} catch (err) {
+			toast.error(`${err}`);
+		} finally {
+			marking = false;
 		}
 	};
 
@@ -617,6 +638,34 @@
 				{/if}
 			</div>
 			<div class="flex items-center gap-2">
+				{#if card.needs_review}
+					<Tooltip
+						content={$i18n.t('Clear the needs-review flag and remove the tag in K4mi')}
+					>
+						<button
+							class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition disabled:opacity-40 disabled:cursor-not-allowed"
+							on:click={handleMarkReviewed}
+							disabled={marking || saving}
+						>
+							{#if marking}
+								<Spinner className="size-3.5" />
+							{:else}
+								<svg
+									xmlns="http://www.w3.org/2000/svg"
+									class="size-3.5"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									><polyline points="20 6 9 17 4 12" /></svg
+								>
+							{/if}
+							{dirty ? $i18n.t('Save & mark reviewed') : $i18n.t('Mark reviewed')}
+						</button>
+					</Tooltip>
+				{/if}
 				<button
 					class="px-3 py-1.5 text-sm rounded-md text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-800 transition"
 					on:click={handleClose}

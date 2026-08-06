@@ -1,3 +1,4 @@
+import { toast } from 'svelte-sonner';
 import { INVOICE_API_BASE_URL } from '$lib/constants';
 
 const BASE = `${INVOICE_API_BASE_URL}/api/accounting`;
@@ -67,6 +68,16 @@ async function apiPost(path: string, body?: any, params?: Record<string, string 
 async function apiPatch(path: string, body: any) {
 	const res = await fetch(`${BASE}${path}`, {
 		method: 'PATCH',
+		headers: authHeaders(),
+		body: JSON.stringify(body)
+	});
+	if (!res.ok) throw await parseErrorResponse(res);
+	return res.json();
+}
+
+async function apiPut(path: string, body: any) {
+	const res = await fetch(`${BASE}${path}`, {
+		method: 'PUT',
 		headers: authHeaders(),
 		body: JSON.stringify(body)
 	});
@@ -153,9 +164,8 @@ export const createManualInvoice = async (companyId: number, data: Record<string
 export const getNextInvoiceNumber = async (companyId: number) =>
 	apiGet(`/companies/${companyId}/next-invoice-number`);
 
-export const downloadInvoicePdf = (invoiceId: number) => {
-	window.open(`${BASE}/invoices/${invoiceId}/pdf`, '_blank');
-};
+export const downloadInvoicePdf = (invoiceId: number) =>
+	downloadFile(`${BASE}/invoices/${invoiceId}/pdf`, `invoice-${invoiceId}.pdf`);
 
 // ─── Chart Templates ────────────────────────────────────────────────────────
 
@@ -178,43 +188,37 @@ export const importChartTemplateFromExcel = async (name: string, file: File, cou
 	return apiUpload('/chart-templates/import-excel', formData, params);
 };
 
-export const downloadChartImportTemplate = () => {
-	window.open(`${BASE}/templates/chart-import-template`, '_blank');
-};
+export const downloadChartImportTemplate = () =>
+	downloadFile(`${BASE}/templates/chart-import-template`, 'chart_of_accounts_template.xlsx');
 
-export const downloadPeriodImportTemplate = () => {
-	window.open(`${BASE}/templates/period-import-template`, '_blank');
-};
+export const downloadPeriodImportTemplate = () =>
+	downloadFile(`${BASE}/templates/period-import-template`, 'period_template.xlsx');
 
-export const downloadBankStatementTemplate = () => {
-	window.open(`${BASE}/templates/bank-statement-template`, '_blank');
-};
+export const downloadBankStatementTemplate = () =>
+	downloadFile(`${BASE}/templates/bank-statement-template`, 'bank_statement_template.xlsx');
+
+export const downloadAssetImportTemplate = () =>
+	downloadFile(`${BASE}/templates/asset-import-template`, 'fixed_assets_template.xlsx');
 
 // ─── Report Exports ─────────────────────────────────────────────────────────
 
-export const exportTrialBalance = (params: { company_id: number; as_of?: string; period_start?: string; ytd_start?: string }) => {
+const qsOf = (params: Record<string, any>): string => {
 	const qs = new URLSearchParams();
 	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
-	window.open(`${BASE}/reports/trial-balance/export?${qs}`, '_blank');
+	return qs.toString();
 };
 
-export const exportProfitLoss = (params: { company_id: number; date_from: string; date_to: string; ytd_start?: string }) => {
-	const qs = new URLSearchParams();
-	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
-	window.open(`${BASE}/reports/profit-loss/export?${qs}`, '_blank');
-};
+export const exportTrialBalance = (params: { company_id: number; as_of?: string; period_start?: string; ytd_start?: string }) =>
+	downloadFile(`${BASE}/reports/trial-balance/export?${qsOf(params)}`, `trial_balance_${params.as_of ?? 'current'}.xlsx`);
 
-export const exportBalanceSheet = (params: { company_id: number; as_of?: string; period_start?: string }) => {
-	const qs = new URLSearchParams();
-	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
-	window.open(`${BASE}/reports/balance-sheet/export?${qs}`, '_blank');
-};
+export const exportProfitLoss = (params: { company_id: number; date_from: string; date_to: string; ytd_start?: string }) =>
+	downloadFile(`${BASE}/reports/profit-loss/export?${qsOf(params)}`, `profit_loss_${params.date_from}_${params.date_to}.xlsx`);
 
-export const exportGeneralLedger = (params: { company_id: number; date_from?: string; date_to?: string }) => {
-	const qs = new URLSearchParams();
-	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
-	window.open(`${BASE}/reports/general-ledger/export?${qs}`, '_blank');
-};
+export const exportBalanceSheet = (params: { company_id: number; as_of?: string; period_start?: string }) =>
+	downloadFile(`${BASE}/reports/balance-sheet/export?${qsOf(params)}`, `balance_sheet_${params.as_of ?? 'current'}.xlsx`);
+
+export const exportGeneralLedger = (params: { company_id: number; date_from?: string; date_to?: string }) =>
+	downloadFile(`${BASE}/reports/general-ledger/export?${qsOf(params)}`, `general_ledger.xlsx`);
 
 // ─── Period Templates ───────────────────────────────────────────────────────
 
@@ -250,6 +254,12 @@ export const importCompanyPeriodsFromExcel = async (companyId: number, file: Fil
 	return apiUpload(`/companies/${companyId}/import-periods`, formData);
 };
 
+export const importCompanyAssetsFromExcel = async (companyId: number, file: File) => {
+	const formData = new FormData();
+	formData.append('file', file);
+	return apiUpload(`/companies/${companyId}/import-assets`, formData);
+};
+
 // ─── Opening Balances ───────────────────────────────────────────────────────
 
 export const getOpeningBalances = async (companyId: number) =>
@@ -257,6 +267,28 @@ export const getOpeningBalances = async (companyId: number) =>
 
 export const updateOpeningBalances = async (companyId: number, entries: any[]) =>
 	apiPatch(`/companies/${companyId}/opening-balances`, { entries });
+
+// Per-party opening-balance sub-ledger detail (AR/AP)
+export const getArApAccounts = async (companyId: number) =>
+	apiGet(`/companies/${companyId}/ar-ap-accounts`);
+
+export const getOpeningBalanceDetails = async (companyId: number, accountId?: number) =>
+	apiGet(`/companies/${companyId}/opening-balance-details`, accountId ? { account_id: accountId } : undefined);
+
+export const setOpeningBalanceDetails = async (companyId: number, accountId: number, details: any[]) =>
+	apiPut(`/companies/${companyId}/opening-balance-details`, { account_id: accountId, details });
+
+export const importOpeningBalanceDetails = async (companyId: number, file: File) => {
+	const formData = new FormData();
+	formData.append('file', file);
+	return apiUpload(`/companies/${companyId}/import-opening-balance-details`, formData);
+};
+
+export const downloadOpeningBalanceDetailTemplate = () =>
+	downloadFile(
+		`${BASE}/templates/opening-balance-detail-template`,
+		'opening_balance_detail_template.xlsx'
+	);
 
 // ─── Accounts ───────────────────────────────────────────────────────────────
 
@@ -391,11 +423,59 @@ export const getBalanceSheet = async (params?: { company_id?: number; as_of?: st
 export const getCashFlow = async (params: { company_id: number; date_from: string; date_to: string }) =>
 	apiGet('/reports/cash-flow', params as any);
 
-export const exportCashFlow = (params: { company_id: number; date_from: string; date_to: string }) => {
-	const qs = new URLSearchParams();
-	for (const [k, v] of Object.entries(params)) { if (v !== undefined) qs.set(k, String(v)); }
-	window.open(`${BASE}/reports/cash-flow/export?${qs}`, '_blank');
-};
+export const exportCashFlow = (params: { company_id: number; date_from: string; date_to: string }) =>
+	downloadFile(`${BASE}/reports/cash-flow/export?${qsOf(params)}`, `cash_flow_${params.date_from}_${params.date_to}.xlsx`);
+
+// ─── Configurable dashboard ─────────────────────────────────────────────────
+
+export interface DashboardLayoutWidget {
+	id: string;
+	type: string;
+	x: number;
+	y: number;
+	w: number;
+	h: number;
+	options?: Record<string, any>;
+}
+
+export interface DashboardLayout {
+	version: number;
+	widgets: DashboardLayoutWidget[];
+}
+
+export const getDashboardLayout = async (
+	companyId: number
+): Promise<{ company_id: number; layout: DashboardLayout | Record<string, never>; updated_at: string | null }> =>
+	apiGet(`/companies/${companyId}/dashboard-layout`);
+
+export const saveDashboardLayout = async (companyId: number, layout: DashboardLayout) =>
+	apiPut(`/companies/${companyId}/dashboard-layout`, { layout });
+
+export interface MonthlySeriesPoint {
+	period: string;
+	revenue: number;
+	expenses: number;
+	net_income: number;
+}
+
+export const getMonthlySeries = async (params: {
+	company_id: number;
+	months?: number;
+}): Promise<{ company_id: number; currency: string; points: MonthlySeriesPoint[] }> =>
+	apiGet('/reports/monthly-series', params as any);
+
+export interface TopPartyRow {
+	name: string;
+	total_amount: number;
+	invoice_count: number;
+}
+
+export const getTopParties = async (params: {
+	company_id: number;
+	direction: 'vendors' | 'customers';
+	limit?: number;
+}): Promise<{ company_id: number; direction: string; currency: string; rows: TopPartyRow[] }> =>
+	apiGet('/reports/top-parties', params as any);
 
 // ─── Invoice Link ───────────────────────────────────────────────────────────
 
@@ -448,11 +528,64 @@ export const getAuditTrail = async (params: {
 
 // ── Aging Reports ─────────────────────────────────────────────────────
 
-export const getAPAging = async (params: { company_id: number; as_of?: string }) =>
+export interface AgingParams {
+	company_id: number;
+	as_of?: string;
+	q?: string;
+	bucket?: string;
+	min_balance?: number;
+	max_balance?: number;
+	sort_by?: 'name' | 'balance' | 'days' | 'bucket';
+	sort_dir?: 'asc' | 'desc';
+}
+
+export const getAPAging = async (params: AgingParams) =>
 	apiGet('/reports/ap-aging', params as any);
 
-export const getARAging = async (params: { company_id: number; as_of?: string }) =>
+export const getARAging = async (params: AgingParams) =>
 	apiGet('/reports/ar-aging', params as any);
+
+const agingExportUrl = (path: string, params: AgingParams): string => {
+	const qs = new URLSearchParams();
+	for (const [k, v] of Object.entries(params)) {
+		if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+	}
+	return `${BASE}${path}?${qs}`;
+};
+
+export const exportAPAging = (params: AgingParams) =>
+	downloadFileAuth(agingExportUrl('/reports/ap-aging/export', params), `ap_aging_${params.as_of ?? 'current'}.xlsx`);
+
+export const exportARAging = (params: AgingParams) =>
+	downloadFileAuth(agingExportUrl('/reports/ar-aging/export', params), `ar_aging_${params.as_of ?? 'current'}.xlsx`);
+
+// ── Transaction ↔ Invoice links (multi-invoice) ───────────────────────
+
+export interface LinkedInvoiceRef {
+	invoice_id: number;
+	invoice_number?: string | null;
+	invoice_date?: string | null;
+	vendor_or_client?: string | null;
+	total_amount?: number | null;
+	k4mi_document_id?: number | null;
+	allocated_amount?: number | null;
+	is_primary?: boolean;
+}
+
+export const getUnmatchedBankLines = async (
+	companyId: number,
+	params?: { amount?: number; tolerance?: number; limit?: number }
+) => apiGet(`/companies/${companyId}/unmatched-bank-lines`, params as any);
+
+export const getTransactionInvoices = async (txnId: number): Promise<LinkedInvoiceRef[]> =>
+	apiGet(`/transactions/${txnId}/invoices`);
+
+export const setTransactionInvoices = async (
+	txnId: number,
+	invoiceIds: number[],
+	allocations?: Record<number, number>
+): Promise<LinkedInvoiceRef[]> =>
+	apiPut(`/transactions/${txnId}/invoices`, { invoice_ids: invoiceIds, allocations: allocations ?? null });
 
 // ─── Invoice List (for selectors) ──────────────────────────────────────────
 
@@ -532,6 +665,12 @@ export const matchBankStatement = async (lineId: number, transactionId: number) 
 export const unmatchBankStatement = async (lineId: number) =>
 	apiPost(`/bank-statements/${lineId}/unmatch`);
 
+export const excludeBankStatement = async (lineId: number) =>
+	apiPost(`/bank-statements/${lineId}/exclude`);
+
+export const includeBankStatement = async (lineId: number) =>
+	apiPost(`/bank-statements/${lineId}/include`);
+
 export const autoMatchBankStatements = async (bankAccountId: number) =>
 	apiPost(`/bank-accounts/${bankAccountId}/auto-match`);
 
@@ -596,6 +735,24 @@ export const bulkImportExchangeRates = async (companyId: number, rates: any[]) =
 export const convertCurrency = async (params: { company_id: number; from_currency: string; to_currency: string; amount: number; as_of?: string }) =>
 	apiGet('/exchange-rates/convert', params as any);
 
+// ─── Global (platform) Exchange Rates ────────────────────────────────
+// The shared "main settings" rate set every company reads unless it overrides.
+
+export const getGlobalExchangeRates = async (params?: { from_currency?: string; to_currency?: string; effective_date?: string }) =>
+	apiGet('/exchange-rates/global', (params ?? {}) as any);
+
+export const createGlobalExchangeRate = async (data: Record<string, any>) =>
+	apiPost('/exchange-rates/global', data);
+
+export const deleteGlobalExchangeRate = async (rateId: number) =>
+	apiDelete(`/exchange-rates/global/${rateId}`);
+
+export const bulkImportGlobalExchangeRates = async (rates: any[]) =>
+	apiPost('/exchange-rates/global/bulk-import', { rates });
+
+export const fetchGlobalRatesNow = async (params?: { source?: string; effective_date?: string; force?: boolean }) =>
+	apiPost('/exchange-rates/global/fetch', {}, (params ?? {}) as any);
+
 // ─── Tax Declaration (Country-Aware) ─────────────────────────────────
 
 export const getTaxConfig = async (companyId: number) =>
@@ -606,6 +763,40 @@ export const getTaxDeclaration = async (params: { company_id: number; period_sta
 
 export const createTaxEntry = async (companyId: number, entry: any) =>
 	apiPost('/reports/tax-declaration/create-entry', { entry }, { company_id: companyId });
+
+export const getCitDeclaration = async (params: {
+	company_id: number;
+	period_start: string;
+	period_end: string;
+	prior_year_losses?: number;
+	cit_already_paid?: number;
+}) => apiGet('/reports/cit-declaration', params as any);
+
+export const getTaxFilings = async (params: { company_id: number; tax_type?: string }) =>
+	apiGet('/tax-filings', params as any);
+
+export const saveTaxFiling = async (companyId: number, data: Record<string, any>) =>
+	apiPost('/tax-filings', data, { company_id: companyId });
+
+export const markTaxFilingPaid = async (
+	filingId: number,
+	data: { bank_account_id: number; paid_date?: string; payable_account_id?: number }
+) => apiPost(`/tax-filings/${filingId}/mark-paid`, data);
+
+export const deleteTaxFiling = async (filingId: number) => apiDelete(`/tax-filings/${filingId}`);
+
+export const exportTaxWorksheet = (params: {
+	company_id: number;
+	tax_type: string;
+	period_start: string;
+	period_end: string;
+	prior_year_losses?: number;
+	cit_already_paid?: number;
+}) =>
+	downloadFile(
+		`${BASE}/reports/tax-worksheet/export?${qsOf(params)}`,
+		`${params.tax_type}_${params.period_end}.xlsx`
+	);
 
 // ─── Closing ─────────────────────────────────────────────────────────
 
@@ -628,6 +819,16 @@ export const deleteFixedAsset = async (assetId: number) =>
 
 export const generateDepreciation = async (companyId: number, periodEnd: string) =>
 	apiPost('/fixed-assets/generate-depreciation', undefined, { company_id: companyId, period_end: periodEnd });
+
+// ─── Country Tax Configs (global, editable) ──────────────────────────
+
+export const getCountryConfigs = async () => apiGet('/country-configs');
+
+export const getCountryConfig = async (country: string) =>
+	apiGet(`/country-configs/${encodeURIComponent(country)}`);
+
+export const updateCountryConfig = async (country: string, data: Record<string, any>) =>
+	apiPut(`/country-configs/${encodeURIComponent(country)}`, data);
 
 // ─── Fiscal Year Carryforward ────────────────────────────────────────
 
@@ -718,6 +919,12 @@ export const restoreEmployee = async (id: number) =>
 export const syncEmployeesToK4mi = async (companyId: number) =>
 	apiPost(`/companies/${companyId}/employees/sync-k4mi`);
 
+// Create (or re-link) a Gnos3 portal login for an existing employee.
+// Returns { linked, created, user_id, temp_password? } — temp_password only
+// when a new account was created.
+export const provisionEmployeeLogin = async (employeeId: number) =>
+	apiPost(`/employees/${employeeId}/provision-login`);
+
 // ─── Expense Categories ─────────────────────────────────────────────────────
 
 export const getExpenseCategories = async (companyId: number) =>
@@ -762,6 +969,12 @@ export const createExpenseSheet = async (companyId: number, data: Record<string,
 export const generateExpenseSheet = async (companyId: number, data: Record<string, any>) =>
 	apiPost(`/companies/${companyId}/expense-sheets/generate`, data);
 
+// Bundle approved employee-submitted expense items into a draft reimbursement sheet.
+export const createExpenseSheetFromItems = async (
+	companyId: number,
+	data: { employee_id: number; expense_item_ids: number[]; title?: string; notes?: string }
+) => apiPost(`/companies/${companyId}/expense-sheets/from-items`, data);
+
 export const getExpenseSheet = async (id: number) => apiGet(`/expense-sheets/${id}`);
 
 export const updateExpenseSheet = async (id: number, data: Record<string, any>) =>
@@ -780,8 +993,71 @@ export const transitionExpenseSheet = async (
 	}
 ) => apiPost(`/expense-sheets/${id}/transitions`, data);
 
-export const expenseSheetPdfUrl = (id: number) =>
-	`${INVOICE_API_BASE_URL}/api/accounting/expense-sheets/${id}/export/pdf`;
+// The module authenticates ONLY via the Authorization header, which a plain
+// <a href>/window.open cannot send — so exports must be fetched with the Bearer
+// token and streamed to the browser as a blob download.
+async function downloadFileAuth(url: string, fallbackName: string): Promise<void> {
+	const res = await fetch(url, { method: 'GET', headers: authHeaders() });
+	if (!res.ok) throw await parseErrorResponse(res);
+	const blob = await res.blob();
+	let filename = fallbackName;
+	const cd = res.headers.get('Content-Disposition');
+	const m = cd && cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+	if (m && m[1]) {
+		try {
+			filename = decodeURIComponent(m[1]);
+		} catch {
+			filename = m[1];
+		}
+	}
+	const objUrl = URL.createObjectURL(blob);
+	const a = document.createElement('a');
+	a.href = objUrl;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	a.remove();
+	URL.revokeObjectURL(objUrl);
+}
 
-export const expenseSheetExcelUrl = (id: number) =>
-	`${INVOICE_API_BASE_URL}/api/accounting/expense-sheets/${id}/export/excel`;
+// Fire-and-forget authenticated download: never throws (surfaces errors as a toast),
+// so `on:click={() => downloadX(...)}` handlers stay safe. Prefer this over
+// window.open, which cannot send the Bearer token every module route requires.
+async function downloadFile(url: string, fallbackName: string): Promise<void> {
+	try {
+		await downloadFileAuth(url, fallbackName);
+	} catch (err: any) {
+		toast.error(err?.detail ?? err?.message ?? String(err));
+	}
+}
+
+export const downloadExpenseSheetPdf = (id: number) =>
+	downloadFileAuth(`${BASE}/expense-sheets/${id}/export/pdf`, `expense-${id}.pdf`);
+
+export const downloadExpenseSheetExcel = (id: number) =>
+	downloadFileAuth(`${BASE}/expense-sheets/${id}/export/excel`, `expense-${id}.xlsx`);
+
+// Filtered dossier: cover summary of all sheets matching the list filters, then
+// each sheet's full detail. Same filter params as getExpenseSheets.
+export const downloadExpenseSheetsPdf = (
+	companyId: number,
+	params?: {
+		status?: string;
+		employee_id?: number;
+		date_from?: string;
+		date_to?: string;
+		search?: string;
+	}
+) => {
+	const qs = new URLSearchParams();
+	if (params) {
+		for (const [k, v] of Object.entries(params)) {
+			if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+		}
+	}
+	const suffix = qs.toString() ? `?${qs}` : '';
+	return downloadFileAuth(
+		`${BASE}/companies/${companyId}/expense-sheets/export/pdf${suffix}`,
+		`expenses-${companyId}.pdf`
+	);
+};

@@ -178,10 +178,18 @@ def _remove_file_from_vector_db(file_id: str, collection_name: str) -> None:
         log.warning("Failed to remove vectors for file %s: %s", file_id, e)
 
 
-def _instantiate_connector(connector: DataConnectorModel) -> BaseConnector:
-    """Create a connector adapter instance from the stored config."""
+def _instantiate_connector(
+    connector: DataConnectorModel, user_id: Optional[str] = None
+) -> BaseConnector:
+    """Create a connector adapter instance from the stored config.
+
+    `user_id` is the owner the sync runs as; connectors that call
+    Gnos3-authenticated module APIs mint a service token as this user.
+    """
     cls = get_connector_class(connector.connector_type)
-    return cls(config=connector.config or {})
+    adapter = cls(config=connector.config or {})
+    adapter.user_id = user_id
+    return adapter
 
 
 # ── Public API ───────────────────────────────────────────────────────
@@ -206,7 +214,7 @@ async def sync_connector(
     stats = {"added": 0, "updated": 0, "deleted": 0, "errors": 0, "total": 0}
 
     try:
-        adapter = _instantiate_connector(connector)
+        adapter = _instantiate_connector(connector, user_id=user_id)
         knowledge_id = await _ensure_knowledge_base(connector, user_id)
 
         # Determine incremental sync start time.
@@ -362,7 +370,7 @@ async def handle_webhook_event(
     if not connector.enabled:
         return [{"status": "skipped", "reason": "connector disabled"}]
 
-    adapter = _instantiate_connector(connector)
+    adapter = _instantiate_connector(connector, user_id=user_id)
     if not adapter.supports_webhooks():
         raise ValueError(f"Connector type {connector.connector_type} does not support webhooks")
 

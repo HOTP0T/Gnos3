@@ -5,7 +5,7 @@
 	import dayjs from 'dayjs';
 	import { browser } from '$app/environment';
 
-	import { getInvoices, updateInvoice, deleteInvoice, reprocessInvoice, getTags } from '$lib/apis/invoices';
+	import { getInvoices, updateInvoice, deleteInvoice, reprocessInvoice, markInvoiceReviewed, getTags } from '$lib/apis/invoices';
 	import { getCompanies, getEmployees, getExpenseCategories } from '$lib/apis/accounting';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
@@ -105,6 +105,7 @@
 
 	// Reprocess loading state
 	let reprocessingIds: Set<number> = new Set();
+	let reviewingIds: Set<number> = new Set();
 
 	// Document preview
 	let showPreview = false;
@@ -349,6 +350,31 @@
 		} finally {
 			reprocessingIds.delete(invoice.id);
 			reprocessingIds = reprocessingIds;
+		}
+	};
+
+	// Mark reviewed — validate a needs-review invoice without editing a field
+	const handleMarkReviewed = async (invoice: any) => {
+		reviewingIds.add(invoice.id);
+		reviewingIds = reviewingIds;
+		const idx = invoices.findIndex((inv) => inv.id === invoice.id);
+		if (idx !== -1) {
+			invoices[idx] = { ...invoices[idx], needs_review: false };
+			invoices = invoices;
+		}
+		try {
+			await markInvoiceReviewed(localStorage.token, invoice.id);
+			toast.success($i18n.t('Marked as reviewed'));
+		} catch (err) {
+			toast.error(`${err}`);
+			// Revert on error
+			if (idx !== -1) {
+				invoices[idx] = invoice;
+				invoices = invoices;
+			}
+		} finally {
+			reviewingIds.delete(invoice.id);
+			reviewingIds = reviewingIds;
 		}
 	};
 
@@ -809,6 +835,36 @@
 											</svg>
 										</button>
 									</Tooltip>
+
+									<!-- Mark reviewed -->
+									{#if invoice.needs_review && invoice.processing_status !== 'processing'}
+										<Tooltip content={$i18n.t('Mark reviewed — clears the flag and removes the needs-review tag in K4mi')}>
+											<button
+												class="p-1 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition text-emerald-600 disabled:opacity-50"
+												disabled={reviewingIds.has(invoice.id)}
+												on:click={() => handleMarkReviewed(invoice)}
+											>
+												{#if reviewingIds.has(invoice.id)}
+													<Spinner className="size-3.5" />
+												{:else}
+													<svg
+														xmlns="http://www.w3.org/2000/svg"
+														fill="none"
+														viewBox="0 0 24 24"
+														stroke-width="2"
+														stroke="currentColor"
+														class="size-3.5"
+													>
+														<path
+															stroke-linecap="round"
+															stroke-linejoin="round"
+															d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"
+														/>
+													</svg>
+												{/if}
+											</button>
+										</Tooltip>
+									{/if}
 
 									<!-- Reprocess -->
 									{#if invoice.processing_status !== 'processing' && (invoice.processing_status === 'failed' || invoice.needs_review || (invoice.confidence_score !== null && parseFloat(invoice.confidence_score) < 0.7))}

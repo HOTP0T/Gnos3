@@ -2,14 +2,36 @@
 	import { onMount, getContext } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { getBalanceSheet, getPeriods, getCompany, exportBalanceSheet } from '$lib/apis/accounting';
+	import type { Writable } from 'svelte/store';
+	import { convertAmount } from '$lib/utils/currency';
+	import ReportAmount from '$lib/components/accounting/ReportAmount.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
 	const i18n = getContext('i18n');
 	export let companyId: number;
 
 	let loading = false;
-	let data: any = null;
+	let rawData: any = null;
 	let isFrench = false;
+
+	// Display-currency conversion (company-wide selector). The balance sheet arrives
+	// in the base currency; scale money fields by the base→display rate as of `as_of`.
+	const displayCurrency = getContext<Writable<string>>('displayCurrency');
+	const exchangeRates = getContext<Writable<any[]>>('exchangeRates');
+	const companyCurrency = getContext<Writable<string>>('companyCurrency');
+
+	$: baseCcy = rawData?.currency || $companyCurrency || 'EUR';
+	$: converting = !!($displayCurrency && baseCcy && $displayCurrency !== baseCcy);
+	$: fx = converting && rawData
+		? convertAmount(1, baseCcy, $displayCurrency, $exchangeRates ?? [], rawData?.as_of)
+		: null;
+	$: factor = converting ? (fx?.hasRate ? fx.rate : null) : 1;
+	$: noRate = converting && !fx?.hasRate;
+	$: displayCcy = converting ? $displayCurrency : baseCcy;
+	// English format uses '—' for zero; French format is blank + fr-FR locale (both 2 dp).
+	$: fxProps = { factor, converting, displayCcy, baseCcy, zeroText: '—' };
+	$: fxPropsFr = { factor, converting, displayCcy, baseCcy, zeroText: '', locale: 'fr-FR' };
+	$: data = rawData;
 
 	// Month picker — user picks a month, we derive as_of and period_start from fiscal year
 	let selectedMonth = '';
@@ -67,7 +89,7 @@
 		if (!opt) { toast.error($i18n.t('Please select a period')); return; }
 		loading = true;
 		try {
-			data = await getBalanceSheet({
+			rawData = await getBalanceSheet({
 				company_id: companyId,
 				as_of: opt.asOf,
 				period_start: opt.fiscalStart
@@ -94,8 +116,14 @@
 		return prefix >= 40 && prefix <= 49;
 	};
 
-	$: assetGroups = data ? groupAssets(data.assets) : { current: [], nonCurrent: [] };
-	$: liabGroups = data ? groupLiabilities(data.liabilities) : { current: [], nonCurrent: [] };
+	// Leaf accounts only — parent rows carry rolled-up subtotals from the backend,
+	// so summing them with their children would double-count. Grand totals still
+	// come from the backend (data.total_*).
+	$: assets = data ? (data.assets ?? []).filter((i: any) => !i.is_parent) : [];
+	$: liabilities = data ? (data.liabilities ?? []).filter((i: any) => !i.is_parent) : [];
+	$: equity = data ? (data.equity ?? []).filter((i: any) => !i.is_parent) : [];
+	$: assetGroups = data ? groupAssets(assets) : { current: [], nonCurrent: [] };
+	$: liabGroups = data ? groupLiabilities(liabilities) : { current: [], nonCurrent: [] };
 	$: selectedLabel = monthOptions.find(o => o.value === selectedMonth)?.label ?? '';
 
 	function groupAssets(items: any[]) {
@@ -244,8 +272,8 @@
 		return groups;
 	}
 
-	$: frActif = (data && isFrench) ? buildFrenchActifGroups(data.assets) : null;
-	$: frPassif = (data && isFrench) ? buildFrenchPassifGroups(data.liabilities, data.equity) : null;
+	$: frActif = (data && isFrench) ? buildFrenchActifGroups(assets) : null;
+	$: frPassif = (data && isFrench) ? buildFrenchPassifGroups(liabilities, equity) : null;
 
 	// Helper: all fixed asset items
 	$: frFixedItems = frActif ? [...frActif.immoIncorporelles, ...frActif.immoCorporelles, ...frActif.immoFinancieres] : [];
@@ -296,6 +324,11 @@
 		<div class="flex justify-center my-10"><Spinner className="size-5" /></div>
 	{:else if data}
 		{@const _ = resetLines()}
+		<div class="text-[11px] text-gray-400 dark:text-gray-500 px-0.5 flex gap-3">
+			{#if displayCcy}<span>{$i18n.t('Currency')}: {displayCcy}</span>{/if}
+			{#if noRate}<span class="text-amber-600 dark:text-amber-400">({$i18n.t('no rate for')} {$displayCurrency}, {$i18n.t('showing')} {baseCcy})</span>{/if}
+			{#if data.opening_balance_date}<span>{$i18n.t('Opening balances as of')} {data.opening_balance_date}</span>{/if}
+		</div>
 
 		{#if isFrench && frActif && frPassif}
 			<!-- ========== FRENCH FORMAT: Bilan Actif + Bilan Passif (HACANTHE reference) ========== -->
@@ -333,7 +366,7 @@
 								<span class="mr-1 inline-block text-[10px]">{collapsedSections.has('actif-immobilise') ? '\u25B6' : '\u25BC'}</span>
 								{$i18n.t('Actif immobilise')}
 								{#if collapsedSections.has('actif-immobilise')}
-									<span class="float-right font-mono">{fmtFr(fixedNet)}</span>
+									<span class="float-right font-mono"><ReportAmount value={fixedNet} {...fxPropsFr} /></span>
 								{/if}
 							</td>
 						</tr>
@@ -346,10 +379,10 @@
 								{#each frActif.immoIncorporelles as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 28px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(isAmortAccount(item.account_code) ? 0 : item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(isAmortAccount(item.account_code) ? Math.abs(parseFloat(item.balance) || 0) : 0)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={isAmortAccount(item.account_code) ? 0 : item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={isAmortAccount(item.account_code) ? Math.abs(parseFloat(item.balance) || 0) : 0} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -362,10 +395,10 @@
 								{#each frActif.immoCorporelles as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 28px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(isAmortAccount(item.account_code) ? 0 : item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(isAmortAccount(item.account_code) ? Math.abs(parseFloat(item.balance) || 0) : 0)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(isAmortAccount(item.account_code) ? 0 : (parseFloat(item.balance) || 0))}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={isAmortAccount(item.account_code) ? 0 : item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={isAmortAccount(item.account_code) ? Math.abs(parseFloat(item.balance) || 0) : 0} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={isAmortAccount(item.account_code) ? 0 : (parseFloat(item.balance) || 0)} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -378,10 +411,10 @@
 								{#each frActif.immoFinancieres as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 28px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(isAmortAccount(item.account_code) ? 0 : item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(isAmortAccount(item.account_code) ? Math.abs(parseFloat(item.balance) || 0) : 0)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={isAmortAccount(item.account_code) ? 0 : item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={isAmortAccount(item.account_code) ? Math.abs(parseFloat(item.balance) || 0) : 0} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -389,10 +422,10 @@
 							<!-- Subtotal: ACTIF IMMOBILISE -->
 							<tr class="border-t border-gray-300 dark:border-gray-600">
 								<td class="px-2 py-1.5 text-right text-green-700 dark:text-green-400 font-bold">{$i18n.t('ACTIF IMMOBILISE')}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(fixedGross)}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(fixedAmort)}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(fixedNet)}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(sumBeg(frFixedItems))}</td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={fixedGross} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={fixedAmort} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={fixedNet} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={sumBeg(frFixedItems)} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
@@ -405,7 +438,7 @@
 								<span class="mr-1 inline-block text-[10px]">{collapsedSections.has('actif-circulant') ? '\u25B6' : '\u25BC'}</span>
 								{$i18n.t('Actif circulant')}
 								{#if collapsedSections.has('actif-circulant')}
-									<span class="float-right font-mono">{fmtFr(currentNet)}</span>
+									<span class="float-right font-mono"><ReportAmount value={currentNet} {...fxPropsFr} /></span>
 								{/if}
 							</td>
 						</tr>
@@ -418,10 +451,10 @@
 								{#each frActif.stocks as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 28px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
 										<td class="px-2 py-1 text-right font-mono"></td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -434,10 +467,10 @@
 								{#each frActif.creances as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 28px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
 										<td class="px-2 py-1 text-right font-mono"></td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -450,10 +483,10 @@
 								{#each frActif.valeursMob as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 28px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
 										<td class="px-2 py-1 text-right font-mono"></td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -463,10 +496,10 @@
 								{#each frActif.disponibilites as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 16px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
 										<td class="px-2 py-1 text-right font-mono"></td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -476,10 +509,10 @@
 								{#each frActif.chargesConstatees as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 16px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
 										<td class="px-2 py-1 text-right font-mono"></td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -489,10 +522,10 @@
 								{#each frActif.otherAssets as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: 16px">{item.account_name}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
 										<td class="px-2 py-1 text-right font-mono"></td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 									</tr>
 								{/each}
 							{/if}
@@ -500,20 +533,20 @@
 							<!-- Subtotal: ACTIF CIRCULANT -->
 							<tr class="border-t border-gray-300 dark:border-gray-600">
 								<td class="px-2 py-1.5 text-right text-green-700 dark:text-green-400 font-bold">{$i18n.t('ACTIF CIRCULANT')}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(currentGross)}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(currentAmort)}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(currentNet)}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(sumBeg(frCurrentItems))}</td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={currentGross} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={currentAmort} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={currentNet} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={sumBeg(frCurrentItems)} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 					</tbody>
 					<tfoot>
 						<tr class="bg-green-600/15 text-green-700 dark:text-green-400 font-bold border-t-2 border-green-300 dark:border-green-700">
 							<td class="px-2 py-2">{$i18n.t('TOTAL ACTIF')}</td>
-							<td class="px-2 py-2 text-right font-mono">{fmtFr(fixedGross + currentGross)}</td>
-							<td class="px-2 py-2 text-right font-mono">{fmtFr(fixedAmort + currentAmort)}</td>
-							<td class="px-2 py-2 text-right font-mono">{fmtFr(data.total_assets)}</td>
-							<td class="px-2 py-2 text-right font-mono">{fmtFr(sumBeg(data.assets))}</td>
+							<td class="px-2 py-2 text-right font-mono"><ReportAmount value={fixedGross + currentGross} {...fxPropsFr} /></td>
+							<td class="px-2 py-2 text-right font-mono"><ReportAmount value={fixedAmort + currentAmort} {...fxPropsFr} /></td>
+							<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_assets} {...fxPropsFr} /></td>
+							<td class="px-2 py-2 text-right font-mono"><ReportAmount value={sumBeg(assets)} {...fxPropsFr} /></td>
 						</tr>
 					</tfoot>
 				</table>
@@ -543,7 +576,7 @@
 								<span class="mr-1 inline-block text-[10px]">{collapsedSections.has('capitaux-propres') ? '\u25B6' : '\u25BC'}</span>
 								{$i18n.t('Capitaux propres')}
 								{#if collapsedSections.has('capitaux-propres')}
-									<span class="float-right font-mono">{fmtFr(sumEnd(frPassif.capitauxPropres))}</span>
+									<span class="float-right font-mono"><ReportAmount value={sumEnd(frPassif.capitauxPropres)} {...fxPropsFr} /></span>
 								{/if}
 							</td>
 						</tr>
@@ -551,15 +584,15 @@
 							{#each frPassif.capitauxPropres as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 									<td class="px-2 py-1" style="padding-left: 16px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 							<!-- Subtotal -->
 							<tr class="border-t border-gray-300 dark:border-gray-600">
 								<td class="px-2 py-1.5 text-right text-green-700 dark:text-green-400 font-bold">{$i18n.t('CAPITAUX PROPRES')}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(sumEnd(frPassif.capitauxPropres))}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(sumBeg(frPassif.capitauxPropres))}</td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={sumEnd(frPassif.capitauxPropres)} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={sumBeg(frPassif.capitauxPropres)} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
@@ -571,8 +604,8 @@
 							{#each frPassif.autresFondsPropres as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 									<td class="px-2 py-1" style="padding-left: 16px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 						{/if}
@@ -585,8 +618,8 @@
 							{#each frPassif.provisions as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 									<td class="px-2 py-1" style="padding-left: 16px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 						{/if}
@@ -600,7 +633,7 @@
 								<span class="mr-1 inline-block text-[10px]">{collapsedSections.has('emprunts-dettes') ? '\u25B6' : '\u25BC'}</span>
 								{$i18n.t('Emprunts et dettes')}
 								{#if collapsedSections.has('emprunts-dettes')}
-									<span class="float-right font-mono">{fmtFr(sumEnd(frPassif.empruntsEtDettes))}</span>
+									<span class="float-right font-mono"><ReportAmount value={sumEnd(frPassif.empruntsEtDettes)} {...fxPropsFr} /></span>
 								{/if}
 							</td>
 						</tr>
@@ -608,15 +641,15 @@
 							{#each frPassif.empruntsEtDettes as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 									<td class="px-2 py-1" style="padding-left: 16px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 							<!-- Subtotal -->
 							<tr class="border-t border-gray-300 dark:border-gray-600">
 								<td class="px-2 py-1.5 text-right text-green-700 dark:text-green-400 font-bold">{$i18n.t('EMPRUNTS ET DETTES')}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(sumEnd(frPassif.empruntsEtDettes))}</td>
-								<td class="px-2 py-1.5 text-right font-mono font-bold">{fmtFr(sumBeg(frPassif.empruntsEtDettes))}</td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={sumEnd(frPassif.empruntsEtDettes)} {...fxPropsFr} /></td>
+								<td class="px-2 py-1.5 text-right font-mono font-bold"><ReportAmount value={sumBeg(frPassif.empruntsEtDettes)} {...fxPropsFr} /></td>
 							</tr>
 						{/if}
 
@@ -625,8 +658,8 @@
 							{#each frPassif.otherPassif as item}
 								<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50 dark:hover:bg-gray-850/30">
 									<td class="px-2 py-1" style="padding-left: 16px">{item.account_name}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.balance)}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmtFr(item.beginning_balance)}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxPropsFr} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxPropsFr} /></td>
 								</tr>
 							{/each}
 						{/if}
@@ -634,8 +667,8 @@
 					<tfoot>
 						<tr class="bg-green-600/15 text-green-700 dark:text-green-400 font-bold border-t-2 border-green-300 dark:border-green-700">
 							<td class="px-2 py-2">{$i18n.t('TOTAL PASSIF')}</td>
-							<td class="px-2 py-2 text-right font-mono">{fmtFr(totalPassif)}</td>
-							<td class="px-2 py-2 text-right font-mono">{fmtFr(sumBeg(data.liabilities) + sumBeg(data.equity))}</td>
+							<td class="px-2 py-2 text-right font-mono"><ReportAmount value={totalPassif} {...fxPropsFr} /></td>
+							<td class="px-2 py-2 text-right font-mono"><ReportAmount value={sumBeg(liabilities) + sumBeg(equity)} {...fxPropsFr} /></td>
 						</tr>
 					</tfoot>
 				</table>
@@ -667,14 +700,14 @@
 									<tr class="border-b border-gray-50 dark:border-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: {8 + item.level * 10}px">{item.account_name}</td>
 										<td class="px-2 py-1 text-gray-400 text-center">{nextLine()}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.beginning_balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxProps} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxProps} /></td>
 									</tr>
 								{/each}
 								<tr class="font-medium border-t border-gray-200 dark:border-gray-700 text-[10px]">
 									<td class="px-2 py-1 italic" colspan="2">{$i18n.t('Sub-total current assets')}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(sumBeg(assetGroups.current))}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(sumEnd(assetGroups.current))}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={sumBeg(assetGroups.current)} {...fxProps} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={sumEnd(assetGroups.current)} {...fxProps} /></td>
 								</tr>
 							{/if}
 
@@ -686,22 +719,22 @@
 									<tr class="border-b border-gray-50 dark:border-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: {8 + item.level * 10}px">{item.account_name}</td>
 										<td class="px-2 py-1 text-gray-400 text-center">{nextLine()}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.beginning_balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxProps} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxProps} /></td>
 									</tr>
 								{/each}
 								<tr class="font-medium border-t border-gray-200 dark:border-gray-700 text-[10px]">
 									<td class="px-2 py-1 italic" colspan="2">{$i18n.t('Sub-total non-current assets')}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(sumBeg(assetGroups.nonCurrent))}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(sumEnd(assetGroups.nonCurrent))}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={sumBeg(assetGroups.nonCurrent)} {...fxProps} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={sumEnd(assetGroups.nonCurrent)} {...fxProps} /></td>
 								</tr>
 							{/if}
 						</tbody>
 						<tfoot class="font-bold bg-blue-50/30 dark:bg-blue-900/10">
 							<tr class="border-t-2 border-blue-200 dark:border-blue-800">
 								<td class="px-2 py-2" colspan="2">{$i18n.t('Total Assets')}</td>
-								<td class="px-2 py-2 text-right font-mono">{fmt(sumBeg(data.assets))}</td>
-								<td class="px-2 py-2 text-right font-mono">{fmt(data.total_assets)}</td>
+								<td class="px-2 py-2 text-right font-mono"><ReportAmount value={sumBeg(assets)} {...fxProps} /></td>
+								<td class="px-2 py-2 text-right font-mono"><ReportAmount value={data.total_assets} {...fxProps} /></td>
 							</tr>
 						</tfoot>
 					</table>
@@ -731,14 +764,14 @@
 									<tr class="border-b border-gray-50 dark:border-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: {8 + item.level * 10}px">{item.account_name}</td>
 										<td class="px-2 py-1 text-gray-400 text-center">{nextLine()}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.beginning_balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxProps} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxProps} /></td>
 									</tr>
 								{/each}
 								<tr class="font-medium border-t border-gray-200 dark:border-gray-700 text-[10px]">
 									<td class="px-2 py-1 italic" colspan="2">{$i18n.t('Sub-total current liabilities')}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(sumBeg(liabGroups.current))}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(sumEnd(liabGroups.current))}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={sumBeg(liabGroups.current)} {...fxProps} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={sumEnd(liabGroups.current)} {...fxProps} /></td>
 								</tr>
 							{/if}
 
@@ -750,47 +783,47 @@
 									<tr class="border-b border-gray-50 dark:border-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: {8 + item.level * 10}px">{item.account_name}</td>
 										<td class="px-2 py-1 text-gray-400 text-center">{nextLine()}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.beginning_balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxProps} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxProps} /></td>
 									</tr>
 								{/each}
 								<tr class="font-medium border-t border-gray-200 dark:border-gray-700 text-[10px]">
 									<td class="px-2 py-1 italic" colspan="2">{$i18n.t('Sub-total non-current liabilities')}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(sumBeg(liabGroups.nonCurrent))}</td>
-									<td class="px-2 py-1 text-right font-mono">{fmt(sumEnd(liabGroups.nonCurrent))}</td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={sumBeg(liabGroups.nonCurrent)} {...fxProps} /></td>
+									<td class="px-2 py-1 text-right font-mono"><ReportAmount value={sumEnd(liabGroups.nonCurrent)} {...fxProps} /></td>
 								</tr>
 							{/if}
 
 							<tr class="font-semibold border-t border-gray-300 dark:border-gray-600">
 								<td class="px-2 py-1.5" colspan="2">{$i18n.t('Total Liabilities')}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(sumBeg(data.liabilities))}</td>
-								<td class="px-2 py-1.5 text-right font-mono">{fmt(data.total_liabilities)}</td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={sumBeg(liabilities)} {...fxProps} /></td>
+								<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={data.total_liabilities} {...fxProps} /></td>
 							</tr>
 
-							{#if data.equity.length > 0}
+							{#if equity.length > 0}
 								<tr class="bg-purple-50/20 dark:bg-purple-900/5">
 									<td class="px-2 py-1 font-medium text-gray-600 dark:text-gray-400 italic" colspan="4">{$i18n.t("Owner's equity:")}</td>
 								</tr>
-								{#each data.equity as item}
+								{#each equity as item}
 									<tr class="border-b border-gray-50 dark:border-gray-850/30">
 										<td class="px-2 py-1" style="padding-left: {8 + item.level * 10}px">{item.account_name}</td>
 										<td class="px-2 py-1 text-gray-400 text-center">{nextLine()}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.beginning_balance)}</td>
-										<td class="px-2 py-1 text-right font-mono">{fmt(item.balance)}</td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.beginning_balance} {...fxProps} /></td>
+										<td class="px-2 py-1 text-right font-mono"><ReportAmount value={item.balance} {...fxProps} /></td>
 									</tr>
 								{/each}
 								<tr class="font-semibold border-t border-gray-300 dark:border-gray-600">
 									<td class="px-2 py-1.5" colspan="2">{$i18n.t("Total Owner's Equity")}</td>
-									<td class="px-2 py-1.5 text-right font-mono">{fmt(sumBeg(data.equity))}</td>
-									<td class="px-2 py-1.5 text-right font-mono">{fmt(data.total_equity)}</td>
+									<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={sumBeg(equity)} {...fxProps} /></td>
+									<td class="px-2 py-1.5 text-right font-mono"><ReportAmount value={data.total_equity} {...fxProps} /></td>
 								</tr>
 							{/if}
 						</tbody>
 						<tfoot class="font-bold bg-orange-50/30 dark:bg-orange-900/10">
 							<tr class="border-t-2 border-orange-200 dark:border-orange-800">
 								<td class="px-2 py-2" colspan="2">{$i18n.t("Total Liabilities & Equity")}</td>
-								<td class="px-2 py-2 text-right font-mono">{fmt(sumBeg(data.liabilities) + sumBeg(data.equity))}</td>
-								<td class="px-2 py-2 text-right font-mono">{fmt(parseFloat(data.total_liabilities) + parseFloat(data.total_equity))}</td>
+								<td class="px-2 py-2 text-right font-mono"><ReportAmount value={sumBeg(liabilities) + sumBeg(equity)} {...fxProps} /></td>
+								<td class="px-2 py-2 text-right font-mono"><ReportAmount value={parseFloat(data.total_liabilities) + parseFloat(data.total_equity)} {...fxProps} /></td>
 							</tr>
 						</tfoot>
 					</table>

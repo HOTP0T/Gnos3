@@ -218,6 +218,7 @@ class InvoiceDBConnector(BaseConnector):
             resp = await client.get(
                 f"{self.api_base}{path}",
                 params=params or {},
+                headers=self._service_auth_headers(),
             )
             resp.raise_for_status()
             return resp.json()

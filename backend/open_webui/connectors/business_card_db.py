@@ -134,6 +134,7 @@ class BusinessCardDBConnector(BaseConnector):
             resp = await client.get(
                 f"{self.api_base}{path}",
                 params=params or {},
+                headers=self._service_auth_headers(),
             )
             resp.raise_for_status()
             return resp.json()
@@ -174,7 +175,8 @@ class BusinessCardDBConnector(BaseConnector):
         try:
             async with httpx.AsyncClient(timeout=60) as client:
                 resp = await client.post(
-                    f"{self.api_base}/api/business-cards/reconcile-notes"
+                    f"{self.api_base}/api/business-cards/reconcile-notes",
+                    headers=self._service_auth_headers(),
                 )
                 if resp.status_code == 200:
                     summary = resp.json()

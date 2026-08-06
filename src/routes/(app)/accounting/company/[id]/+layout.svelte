@@ -5,7 +5,7 @@
 	import { page } from '$app/stores';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import Sidebar from '$lib/components/icons/Sidebar.svelte';
-	import { getCompany, getExchangeRates } from '$lib/apis/accounting';
+	import { getCompany, getExchangeRates, getGlobalExchangeRates } from '$lib/apis/accounting';
 
 	const i18n = getContext('i18n');
 
@@ -46,7 +46,7 @@
 		{ key: 'expenses', label: 'Expenses' },
 		{ key: 'reports', label: 'Reports' },
 		{ key: 'tax', label: 'Tax' },
-		{ key: 'assets', label: 'Assets' },
+		{ key: 'assets', label: 'Fixed Assets' },
 		{ key: 'closing', label: 'Closing' },
 		{ key: 'settings', label: 'Settings' }
 	];
@@ -151,10 +151,20 @@
 			companyCurrencyStore.set(companyCurrency);
 			displayCurrency.set(companyCurrency);
 
-			// Load exchange rates
+			// Load exchange rates: the full shared global set plus any company-specific
+			// overrides. Overrides go first so they win on ties in convertAmount's
+			// nearest-date search. The full set (not just this company's base) is loaded
+			// so consumers that convert from a non-base currency — e.g. bank
+			// reconciliation, whose amounts are in the bank account's currency — resolve.
 			try {
-				const rates = await getExchangeRates({ company_id: companyId });
-				exchangeRates.set(Array.isArray(rates) ? rates : []);
+				const [companyRates, globalRates] = await Promise.all([
+					getExchangeRates({ company_id: companyId }).catch(() => []),
+					getGlobalExchangeRates().catch(() => [])
+				]);
+				exchangeRates.set([
+					...(Array.isArray(companyRates) ? companyRates : []),
+					...(Array.isArray(globalRates) ? globalRates : [])
+				]);
 				ratesLoaded.set(true);
 			} catch {
 				exchangeRates.set([]);

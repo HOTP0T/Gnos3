@@ -5,6 +5,7 @@
 	import {
 		getClosingChecklist,
 		yearEndClose,
+		carryForwardBalances,
 		generateDepreciation,
 		getPeriods,
 		bulkPostTransactions,
@@ -24,6 +25,7 @@
 	let checking = false;
 	let closing = false;
 	let generatingYearEnd = false;
+	let carryingForward = false;
 	let checklist: any = null;
 
 	// Month selector
@@ -198,6 +200,30 @@
 			toast.error($i18n.t('Failed to create year-end closing entry') + ': ' + msg);
 		}
 		generatingYearEnd = false;
+	};
+
+	const handleCarryForward = async () => {
+		if (!selectedOpt) return;
+		// Opening date = day after the fiscal year end (start of next fiscal year).
+		const close = new Date(selectedOpt.to + 'T00:00:00');
+		const next = new Date(close);
+		next.setDate(next.getDate() + 1);
+		const openingDate = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+		carryingForward = true;
+		try {
+			const result = await carryForwardBalances(companyId, {
+				closing_date: selectedOpt.to,
+				opening_date: openingDate
+			});
+			const txId = result?.id ?? result?.transaction_id ?? '';
+			toast.success(
+				$i18n.t('Opening balances carried forward to next year') + (txId ? ` (ID: ${txId})` : '')
+			);
+		} catch (err: any) {
+			const msg = err?.detail ?? err?.message ?? String(err);
+			toast.error($i18n.t('Failed to carry forward balances') + ': ' + msg);
+		}
+		carryingForward = false;
 	};
 
 	const statusIcon = (status: string): string => {
@@ -403,7 +429,7 @@
 						</div>
 					{/if}
 
-					<div class="px-4 py-3 border-t border-amber-100 dark:border-amber-800/30">
+					<div class="px-4 py-3 border-t border-amber-100 dark:border-amber-800/30 flex flex-wrap items-center gap-3">
 						<button
 							class="px-4 py-2 text-sm font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 dark:bg-amber-500 dark:hover:bg-amber-600 transition disabled:opacity-50"
 							disabled={generatingYearEnd}
@@ -412,6 +438,16 @@
 							{generatingYearEnd
 								? $i18n.t('Generating...')
 								: $i18n.t('Generate Year-End Closing Entry')}
+						</button>
+						<button
+							class="px-4 py-2 text-sm font-medium rounded-lg border border-amber-500 text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-900/20 transition disabled:opacity-50"
+							disabled={carryingForward}
+							on:click={handleCarryForward}
+							title={$i18n.t('Roll asset/liability/equity closing balances into the next fiscal year as opening balances')}
+						>
+							{carryingForward
+								? $i18n.t('Carrying forward...')
+								: $i18n.t('Carry Forward Opening Balances')}
 						</button>
 					</div>
 				</div>

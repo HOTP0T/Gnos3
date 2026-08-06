@@ -3,15 +3,21 @@
 	import { toast } from 'svelte-sonner';
 
 	import { getAccounts, deleteAccount, getOpeningBalances, updateOpeningBalances, updateCompany } from '$lib/apis/accounting';
+	import { user, isAdmin } from '$lib/stores';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import AccountFormModal from '$lib/components/accounting/AccountFormModal.svelte';
+	import OpeningBalanceDetailModal from '$lib/components/accounting/OpeningBalanceDetailModal.svelte';
 
 	const i18n = getContext('i18n');
 
 	export let companyId: number;
+
+	// Permissions (UX gating; backend enforces the real check)
+	$: canWrite = $isAdmin || Boolean($user?.permissions?.modules?.accounting?.write);
+	$: canDelete = $isAdmin || Boolean($user?.permissions?.modules?.accounting?.admin);
 
 	// Data
 	let accounts: any[] = [];
@@ -30,6 +36,7 @@
 	// Modal state
 	let showFormModal = false;
 	let editingAccount: any = null;
+	let showObDetail = false;
 
 	// Delete confirmation
 	let showDeleteConfirm = false;
@@ -201,6 +208,8 @@
 	on:save={handleSave}
 />
 
+<OpeningBalanceDetailModal bind:show={showObDetail} {companyId} />
+
 <div class="py-2">
 	<!-- Header -->
 	<div
@@ -251,6 +260,16 @@
 					{$i18n.t('Save Opening Balances')}
 				</button>
 			{/if}
+			{#if canWrite}
+			<button
+				class="px-3.5 py-1.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-850 dark:text-gray-200 font-medium transition"
+				on:click={() => (showObDetail = true)}
+				title={$i18n.t('Split AR/AP opening balances by customer/vendor')}
+			>
+				{$i18n.t('AR/AP Opening Detail')}
+			</button>
+			{/if}
+			{#if canWrite}
 			<button
 				class="px-3.5 py-1.5 text-sm rounded-xl bg-gray-900 hover:bg-gray-850 text-white dark:bg-gray-100 dark:hover:bg-white dark:text-gray-800 font-medium transition flex items-center gap-1.5"
 				on:click={openAddModal}
@@ -267,6 +286,7 @@
 				</svg>
 				{$i18n.t('Add Account')}
 			</button>
+			{/if}
 		</div>
 	</div>
 
@@ -411,7 +431,7 @@
 
 											<!-- Actions -->
 											<td class="px-4 py-2 text-right">
-												{#if acct.is_active}
+												{#if acct.is_active && canDelete}
 													<button
 														class="p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition text-red-500"
 														on:click={(e) => confirmDeactivate(e, acct)}

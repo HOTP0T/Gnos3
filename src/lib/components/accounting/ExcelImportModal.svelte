@@ -8,7 +8,8 @@
 		importChartTemplateFromExcel,
 		importPeriodTemplateFromExcel,
 		importCompanyAccountsFromExcel,
-		importCompanyPeriodsFromExcel
+		importCompanyPeriodsFromExcel,
+		importCompanyAssetsFromExcel
 	} from '$lib/apis/accounting';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -17,7 +18,7 @@
 	const dispatch = createEventDispatcher();
 
 	export let show = false;
-	export let type: 'chart' | 'period' = 'chart';
+	export let type: 'chart' | 'period' | 'asset' = 'chart';
 	export let companyId: number | undefined = undefined;
 	export let onImported: (() => void) | undefined = undefined;
 
@@ -80,11 +81,13 @@
 				// Import directly to company
 				if (type === 'chart') {
 					res = await importCompanyAccountsFromExcel(companyId, file);
+				} else if (type === 'asset') {
+					res = await importCompanyAssetsFromExcel(companyId, file);
 				} else {
 					res = await importCompanyPeriodsFromExcel(companyId, file);
 				}
 			} else {
-				// Import as template
+				// Import as template (chart/period only — assets have no template)
 				if (type === 'chart') {
 					res = await importChartTemplateFromExcel(
 						name.trim(),
@@ -97,8 +100,8 @@
 			}
 
 			result = {
-				imported_count: res?.imported_count ?? res?.count ?? 0,
-				skipped_count: res?.skipped_count ?? 0,
+				imported_count: res?.imported ?? res?.imported_count ?? res?.count ?? 0,
+				skipped_count: res?.skipped ?? res?.skipped_count ?? 0,
 				errors: res?.errors ?? []
 			};
 
@@ -153,7 +156,9 @@
 					{#if companyId}
 						{type === 'chart'
 							? $i18n.t('Import Accounts from Excel')
-							: $i18n.t('Import Periods from Excel')}
+							: type === 'asset'
+								? $i18n.t('Import Fixed Assets from Excel')
+								: $i18n.t('Import Periods from Excel')}
 					{:else}
 						{type === 'chart'
 							? $i18n.t('Import Chart Template from Excel')

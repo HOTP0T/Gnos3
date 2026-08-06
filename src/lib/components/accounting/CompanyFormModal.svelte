@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, getContext, createEventDispatcher } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { fade } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { toast } from 'svelte-sonner';
@@ -30,6 +31,7 @@
 
 	let submitting = false;
 	let loadingTemplates = false;
+	let createdCompany: any = null;
 
 	// Template options
 	let chartTemplates: any[] = [];
@@ -100,6 +102,7 @@
 	}
 
 	const initForm = () => {
+		createdCompany = null;
 		if (company) {
 			name = company.name || '';
 			description = company.description || '';
@@ -164,7 +167,8 @@
 
 	const handleKeyDown = (event: KeyboardEvent) => {
 		if (event.key === 'Escape') {
-			show = false;
+			if (createdCompany) finishCreate();
+			else show = false;
 		}
 	};
 
@@ -191,20 +195,39 @@
 			if (isEditMode) {
 				result = await updateCompany(company.id, payload);
 				toast.success($i18n.t('Company updated'));
+				dispatch('save', result);
+				if (onSave) {
+					onSave();
+				}
+				show = false;
 			} else {
 				result = await createCompany(payload);
 				toast.success($i18n.t('Company created'));
+				// Keep the modal open on a post-create step so the user can import the
+				// new company's fixed-asset register right away (finalized on Done).
+				createdCompany = result;
 			}
-			dispatch('save', result);
-			if (onSave) {
-				onSave();
-			}
-			show = false;
 		} catch (err: any) {
 			toast.error(err?.detail || `${err}`);
 		} finally {
 			submitting = false;
 		}
+	};
+
+	const finishCreate = () => {
+		const c = createdCompany;
+		createdCompany = null;
+		show = false;
+		dispatch('save', c);
+		if (onSave) {
+			onSave();
+		}
+	};
+
+	const goToAssets = () => {
+		const id = createdCompany?.id;
+		finishCreate();
+		if (id) goto(`/accounting/company/${id}/assets`);
 	};
 
 	$: if (show && modalElement) {
@@ -231,7 +254,8 @@
 		class="fixed top-0 right-0 left-0 bottom-0 bg-black/60 w-full h-screen max-h-[100dvh] flex justify-center z-99999999 overflow-hidden overscroll-contain"
 		in:fade={{ duration: 10 }}
 		on:mousedown={() => {
-			show = false;
+			if (createdCompany) finishCreate();
+			else show = false;
 		}}
 	>
 		<div
@@ -243,9 +267,40 @@
 		>
 			<div class="px-[1.75rem] py-6 flex flex-col">
 				<div class="text-lg font-medium dark:text-gray-200 mb-4">
-					{isEditMode ? $i18n.t('Edit Company') : $i18n.t('Create Company')}
+					{createdCompany
+						? $i18n.t('Company Created')
+						: isEditMode
+							? $i18n.t('Edit Company')
+							: $i18n.t('Create Company')}
 				</div>
 
+				{#if createdCompany}
+					<div class="flex flex-col gap-4">
+						<div
+							class="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 border border-green-200/50 dark:border-green-800/30 text-sm text-green-800 dark:text-green-200"
+						>
+							{$i18n.t(
+								'Company created. Import its fixed-asset register now, or later from the Fixed Assets tab.'
+							)}
+						</div>
+						<div class="flex justify-between gap-1.5">
+							<button
+								type="button"
+								class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-800 dark:bg-gray-850 dark:hover:bg-gray-800 dark:text-white font-medium w-full py-2 rounded-3xl transition"
+								on:click={finishCreate}
+							>
+								{$i18n.t('Done')}
+							</button>
+							<button
+								type="button"
+								class="text-sm bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 font-medium w-full py-2 rounded-3xl transition"
+								on:click={goToAssets}
+							>
+								{$i18n.t('Import Fixed Assets')}
+							</button>
+						</div>
+					</div>
+				{:else}
 				<form
 					class="flex flex-col gap-3"
 					on:submit|preventDefault={handleSubmit}
@@ -442,6 +497,7 @@
 						</button>
 					</div>
 				</form>
+				{/if}
 			</div>
 		</div>
 	</div>

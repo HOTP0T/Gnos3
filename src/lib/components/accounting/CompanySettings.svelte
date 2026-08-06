@@ -29,16 +29,16 @@
 	let chartKey = 0;
 	let periodKey = 0;
 
-	// Collapse state — chart of accounts collapsed by default
+	// Collapse state — all sections collapsed by default
 	let collapsed: Record<string, boolean> = {
 		chart: true,
-		periods: false,
-		categorization: false,
-		exchange: false,
-		assets: false,
-		recurring: false,
-		employees: false,
-		expenseCategories: false
+		periods: true,
+		categorization: true,
+		exchange: true,
+		assets: true,
+		recurring: true,
+		employees: true,
+		expenseCategories: true
 	};
 
 	const toggle = (key: string) => {

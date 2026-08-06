@@ -323,6 +323,33 @@ export const reprocessInvoice = async (token: string, id: number) => {
 	return res;
 };
 
+export const markInvoiceReviewed = async (token: string, id: number) => {
+	let error = null;
+
+	const res = await fetch(`${INVOICE_API_BASE_URL}/api/invoices/${id}/mark-reviewed`, {
+		method: 'POST',
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${token}`
+		}
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			console.error(err);
+			error = err.detail ?? err;
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const getNeedsReview = async (token: string) => {
 	let error = null;
 

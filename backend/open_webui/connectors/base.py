@@ -9,7 +9,7 @@ The sync service calls these methods — connectors don't touch the RAG pipeline
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Optional
 
 from pydantic import BaseModel
@@ -51,6 +51,32 @@ class BaseConnector(ABC):
 
     def __init__(self, config: dict):
         self.config = config
+        # Set by the sync service after instantiation (see
+        # data_connector._instantiate_connector). The id of the Gnos3 user the
+        # connector runs as — its owner. Used to mint service auth for calls to
+        # Gnos3-authenticated module APIs.
+        self.user_id: Optional[str] = None
+
+    def _service_auth_headers(self) -> dict:
+        """Mint a short-lived service JWT for the connector's owner so calls to
+        Gnos3-authenticated module APIs (invoice-processor, business-card-
+        processor) are authorized as that user.
+
+        Signed with WEBUI_SECRET_KEY — the same key the modules verify with —
+        and carries only the owner's `id`, matching the JWT shape the modules
+        expect. Minted fresh per call and short-lived, so there is no stored
+        secret to manage or rotate. Returns {} when no owner is set, which
+        preserves the pre-auth behavior rather than crashing (the sync worker
+        always sets `user_id`, so this only guards direct/test instantiation).
+        """
+        if not self.user_id:
+            return {}
+        # Lazy import: utils.auth pulls in models/config, and importing it at
+        # module load could risk cycles during connector registration.
+        from open_webui.utils.auth import create_token
+
+        token = create_token({"id": self.user_id}, expires_delta=timedelta(minutes=10))
+        return {"Authorization": f"Bearer {token}"}
 
     @abstractmethod
     async def list_documents(

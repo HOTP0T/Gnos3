@@ -173,5 +173,16 @@ export const syncBusinessCardFromK4mi = async (
 	return asJson(res);
 };
 
+export const markBusinessCardReviewed = async (
+	_token: string,
+	id: number
+): Promise<BusinessCard> => {
+	const res = await fetch(
+		`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}/mark-reviewed`,
+		{ method: 'POST', headers: authHeaders() }
+	);
+	return asJson(res);
+};
+
 export const getBusinessCardPreviewUrl = (id: number): string =>
 	`${BUSINESS_CARDS_API_BASE_URL}/api/business-cards/${id}/preview`;

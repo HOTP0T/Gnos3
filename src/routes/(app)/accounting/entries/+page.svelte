@@ -1,5 +1,10 @@
 <script lang="ts">
-	import TransactionTable from '$lib/components/accounting/TransactionTable.svelte';
-</script>
+	// Legacy pre-multi-company route — these views are now company-scoped under
+	// /accounting/company/[id]/…. Redirect to the company list.
+	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 
-<TransactionTable />
+	onMount(() => {
+		goto('/accounting/companies');
+	});
+</script>

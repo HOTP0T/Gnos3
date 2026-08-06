@@ -1625,6 +1625,10 @@ DEFAULT_USER_PERMISSIONS = {
             'post': False,    # post / void journal entries, void match groups
             'admin': False,   # delete company, chart/period mgmt, Excel import
         },
+        'finances': {
+            'read': False,
+            'write': False,   # reserved; the module manages its own data via SSO
+        },
     },
     'k4mi': {
         'documents': {

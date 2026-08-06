@@ -6,6 +6,7 @@
 
 	import { getPayments, deletePayment, getAccounts } from '$lib/apis/accounting';
 	import { convertAmount } from '$lib/utils/currency';
+	import { user, isAdmin } from '$lib/stores';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
@@ -19,6 +20,10 @@
 	const companyCurrencyCtx = getContext<Writable<string>>('companyCurrency');
 
 	export let companyId: number;
+
+	// Permissions (UX gating; backend enforces the real check)
+	$: canWrite = $isAdmin || Boolean($user?.permissions?.modules?.accounting?.write);
+	$: canDelete = $isAdmin || Boolean($user?.permissions?.modules?.accounting?.admin);
 
 	// Data
 	let payments: any[] = [];
@@ -225,6 +230,7 @@
 		</div>
 
 		<div class="flex gap-2">
+			{#if canWrite}
 			<button
 				class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-800 dark:hover:bg-white transition"
 				on:click={() => {
@@ -233,6 +239,7 @@
 			>
 				{$i18n.t('Record Payment')}
 			</button>
+			{/if}
 		</div>
 	</div>
 
@@ -455,6 +462,7 @@
 							<!-- Actions -->
 							<td class="px-3 py-1.5 text-right whitespace-nowrap">
 								<div class="flex items-center justify-end gap-1">
+									{#if canDelete}
 									<Tooltip content={$i18n.t('Delete')}>
 										<button
 											class="p-1 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition text-red-500"
@@ -476,6 +484,7 @@
 											</svg>
 										</button>
 									</Tooltip>
+									{/if}
 								</div>
 							</td>
 						</tr>

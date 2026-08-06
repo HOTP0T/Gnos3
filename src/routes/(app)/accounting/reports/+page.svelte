@@ -1,5 +1,10 @@
 <script lang="ts">
-	import ReportsView from '$lib/components/accounting/ReportsView.svelte';
-</script>
+	// Legacy pre-multi-company route — these views are now company-scoped under
+	// /accounting/company/[id]/…. Redirect to the company list.
+	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 
-<ReportsView />
+	onMount(() => {
+		goto('/accounting/companies');
+	});
+</script>
