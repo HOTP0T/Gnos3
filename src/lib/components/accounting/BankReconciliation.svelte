@@ -8,6 +8,7 @@
 	import {
 		getBankAccounts,
 		createBankAccount,
+		updateBankAccount,
 		getBankStatements,
 		importBankStatement,
 		autoMatchBankStatements,
@@ -40,6 +41,51 @@
 	let newBankName = '';
 	let newBankAccountId: number | null = null;
 	let newBankCurrency = '';
+	let newBankInboundId: number | null = null;
+	let newBankOutboundId: number | null = null;
+
+	// Edit the selected bank account's GL mapping
+	let showEditBank = false;
+	let editBankAccountId: number | null = null;
+	let editBankInboundId: number | null = null;
+	let editBankOutboundId: number | null = null;
+
+	// A line the accountant considers done. Used to tell "nothing posted yet"
+	// apart from "posted nowhere", which look identical without it.
+	const isLineMatched = (line: any) =>
+		['manual_matched', 'auto_matched'].includes(line?.match_status);
+
+	const toggleEditBank = () => {
+		showEditBank = !showEditBank;
+		if (!showEditBank) return;
+		const ba = bankAccounts.find((b) => b.id === selectedBankId);
+		editBankAccountId = ba?.account_id ?? null;
+		editBankInboundId = ba?.default_inbound_account_id ?? null;
+		editBankOutboundId = ba?.default_outbound_account_id ?? null;
+	};
+
+	const handleSaveBankAccounts = async () => {
+		if (!selectedBankId) return;
+		try {
+			await updateBankAccount(selectedBankId, {
+				account_id: editBankAccountId,
+				default_inbound_account_id: editBankInboundId,
+				default_outbound_account_id: editBankOutboundId
+			});
+			bankAccounts = await getBankAccounts(companyId);
+			showEditBank = false;
+			toast.success($i18n.t('Bank account updated'));
+		} catch (err) {
+			toast.error(`${err}`);
+		}
+	};
+
+	// Only detail accounts may be posted to — an account with sub-accounts is a
+	// roll-up header, and an entry landing on it never shows in the sub-ledger.
+	$: controlAccountIds = new Set(
+		accounts.filter((a) => a.parent_id).map((a) => a.parent_id)
+	);
+	$: postableAccounts = accounts.filter((a) => !controlAccountIds.has(a.id));
 
 	// Filter
 	let statusFilter = '';
@@ -180,7 +226,13 @@
 	const handleCreateBank = async () => {
 		if (!newBankName) return;
 		try {
-			await createBankAccount(companyId, { name: newBankName, account_id: newBankAccountId, currency: (newBankCurrency || '').toUpperCase() || undefined });
+			await createBankAccount(companyId, {
+				name: newBankName,
+				account_id: newBankAccountId,
+				currency: (newBankCurrency || '').toUpperCase() || undefined,
+				default_inbound_account_id: newBankInboundId,
+				default_outbound_account_id: newBankOutboundId
+			});
 			toast.success($i18n.t('Bank account created'));
 			showNewBank = false;
 			newBankName = '';
@@ -755,6 +807,11 @@
 					</span>
 				{/if}
 			{/if}
+			{#if selectedBankId}
+				<button class="text-xs text-blue-600 hover:text-blue-700" on:click={toggleEditBank}>
+					{showEditBank ? $i18n.t('Cancel') : $i18n.t('Accounts')}
+				</button>
+			{/if}
 			<button class="text-xs text-blue-600 hover:text-blue-700" on:click={() => (showNewBank = !showNewBank)}>
 				{showNewBank ? $i18n.t('Cancel') : $i18n.t('+ New Bank')}
 			</button>
@@ -791,7 +848,25 @@
 				<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('GL Account')}</label>
 				<select bind:value={newBankAccountId} class="text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden">
 					<option value={null}>—</option>
-					{#each accounts.filter(a => a.account_type === 'asset') as acct}
+					{#each postableAccounts.filter(a => a.account_type === 'asset') as acct}
+						<option value={acct.id}>{acct.code} — {acct.name}</option>
+					{/each}
+				</select>
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1" title={$i18n.t('Account credited when money leaves this bank and the party is not identified')}>{$i18n.t('Payments out →')}</label>
+				<select bind:value={newBankOutboundId} class="text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden">
+					<option value={null}>—</option>
+					{#each postableAccounts as acct}
+						<option value={acct.id}>{acct.code} — {acct.name}</option>
+					{/each}
+				</select>
+			</div>
+			<div>
+				<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1" title={$i18n.t('Account debited when money arrives in this bank and the party is not identified')}>{$i18n.t('Payments in →')}</label>
+				<select bind:value={newBankInboundId} class="text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden">
+					<option value={null}>—</option>
+					{#each postableAccounts as acct}
 						<option value={acct.id}>{acct.code} — {acct.name}</option>
 					{/each}
 				</select>
@@ -801,6 +876,44 @@
 				<input type="text" maxlength="3" bind:value={newBankCurrency} placeholder={selectedBankCurrency || 'USD'} class="w-20 text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden uppercase" />
 			</div>
 			<button class="px-3 py-1.5 text-sm font-medium rounded-lg bg-green-600 text-white hover:bg-green-700 transition" on:click={handleCreateBank}>{$i18n.t('Create')}</button>
+		</div>
+	{/if}
+
+	{#if showEditBank && selectedBankId}
+		<div class="p-3 rounded-lg bg-gray-50 dark:bg-gray-850 border border-gray-200 dark:border-gray-800 space-y-2">
+			<div class="text-xs text-gray-500 dark:text-gray-400">
+				{$i18n.t('Where entries from this bank\'s statements post. Only detail accounts are listed — an account with sub-accounts cannot be posted to.')}
+			</div>
+			<div class="flex gap-2 items-end flex-wrap">
+				<div>
+					<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Bank GL Account')}</label>
+					<select bind:value={editBankAccountId} class="text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden">
+						<option value={null}>—</option>
+						{#each postableAccounts.filter(a => a.account_type === 'asset') as acct}
+							<option value={acct.id}>{acct.code} — {acct.name}</option>
+						{/each}
+					</select>
+				</div>
+				<div>
+					<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Payments out →')}</label>
+					<select bind:value={editBankOutboundId} class="text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden">
+						<option value={null}>—</option>
+						{#each postableAccounts as acct}
+							<option value={acct.id}>{acct.code} — {acct.name}</option>
+						{/each}
+					</select>
+				</div>
+				<div>
+					<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Payments in →')}</label>
+					<select bind:value={editBankInboundId} class="text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden">
+						<option value={null}>—</option>
+						{#each postableAccounts as acct}
+							<option value={acct.id}>{acct.code} — {acct.name}</option>
+						{/each}
+					</select>
+				</div>
+				<button class="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition" on:click={handleSaveBankAccounts}>{$i18n.t('Save')}</button>
+			</div>
 		</div>
 	{/if}
 
@@ -925,12 +1038,13 @@
 							<th class="px-2 py-2 text-right">{$i18n.t('Credit')}</th>
 							<th class="px-2 py-2 text-center">{$i18n.t('Currency')}</th>
 							<th class="px-2 py-2 text-center">{$i18n.t('Status')}</th>
+							<th class="px-2 py-2">{$i18n.t('Posted to')}</th>
 							<th class="px-2 py-2 text-right">{$i18n.t('Actions')}</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#if filteredStatements.length === 0 && statements.length > 0}
-							<tr><td colspan="10" class="px-4 py-6 text-center text-xs text-gray-400 italic">{$i18n.t('No lines match your filters.')}</td></tr>
+							<tr><td colspan="11" class="px-4 py-6 text-center text-xs text-gray-400 italic">{$i18n.t('No lines match your filters.')}</td></tr>
 						{/if}
 						{#each filteredStatements as line (line.id)}
 							<tr class="border-b border-gray-50 dark:border-gray-850/30 hover:bg-gray-50/50 dark:hover:bg-gray-850/30">
@@ -1030,6 +1144,29 @@
 										</button>
 									{/if}
 								</td>
+								<!-- Which GL account this line was actually posted to. A reconciled
+								     line with nothing here is booked nowhere — the bank says the money
+								     moved and the ledger has no entry for it. -->
+								<td class="px-2 py-1.5 whitespace-nowrap">
+									{#if line.posting?.primary_account_code}
+										<div class="flex items-baseline gap-1">
+											<span class="font-mono text-[11px] text-gray-700 dark:text-gray-300">{line.posting.primary_account_code}</span>
+											<span class="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[10rem]">{line.posting.primary_account_name}</span>
+											{#if line.posting.extra_count}
+												<span class="px-1 rounded bg-gray-100 dark:bg-gray-800 text-[9px] text-gray-500">+{line.posting.extra_count}</span>
+											{/if}
+										</div>
+									{:else if isLineMatched(line)}
+										<span
+											class="px-1.5 py-0.5 rounded bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 text-[10px] font-medium"
+											title={$i18n.t('This line is marked reconciled but no accounting entry exists for it')}
+										>
+											{$i18n.t('Not posted')}
+										</span>
+									{:else}
+										<span class="text-[10px] text-gray-300 dark:text-gray-600">—</span>
+									{/if}
+								</td>
 								<td class="px-2 py-1.5 text-right whitespace-nowrap">
 									{#if line.match_status === 'excluded'}<button class="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 transition" on:click={() => handleInclude(line.id)}>{$i18n.t('Include')}</button>{:else if line.match_status === 'unmatched' || line.match_status === 'partial_matched'}
 										<!-- Match button with popover -->
@@ -1078,7 +1215,63 @@
 							<!-- Expandable matched details row -->
 							{#if expandedLineId === line.id && (line.matched_transaction_id || (line.match_groups && line.match_groups.length > 0))}
 								<tr class="bg-gray-50/80 dark:bg-gray-850/50">
-									<td colspan="10" class="px-4 py-2">
+									<td colspan="11" class="px-4 py-2">
+										<!-- What this line actually booked, before the matched-entry list.
+										     `settlement` means reconciling created a payment entry; otherwise
+										     the accounts come from the entry the line was matched against. -->
+										{#if line.posting}
+											<div class="text-[10px] uppercase font-medium text-gray-500 dark:text-gray-400 mb-1.5">
+												{$i18n.t('Posted to')}
+												<span class="normal-case font-normal text-gray-400">
+													· {line.posting.source === 'settlement'
+														? $i18n.t('settlement entry created on reconciliation')
+														: $i18n.t('accounts of the matched entry')}
+													{#if line.posting.settlement_entry?.entry_number}
+														· {line.posting.settlement_entry.entry_number}
+													{/if}
+												</span>
+											</div>
+											<div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-3">
+												<table class="w-full text-xs">
+													<thead class="text-[10px] bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+														<tr>
+															<th class="px-2 py-1 text-left">{$i18n.t('Account')}</th>
+															<th class="px-2 py-1 text-left">{$i18n.t('Name')}</th>
+															<th class="px-2 py-1 text-right">{$i18n.t('Debit')}</th>
+															<th class="px-2 py-1 text-right">{$i18n.t('Credit')}</th>
+														</tr>
+													</thead>
+													<tbody>
+														{#each line.posting.counterparts ?? [] as cp}
+															<tr class="border-t border-gray-100 dark:border-gray-800">
+																<td class="px-2 py-1 font-mono">{cp.account_code}</td>
+																<td class="px-2 py-1">{cp.account_name}</td>
+																<td class="px-2 py-1 text-right font-mono">{parseFloat(cp.debit) ? fmt(cp.debit) : '—'}</td>
+																<td class="px-2 py-1 text-right font-mono">{parseFloat(cp.credit) ? fmt(cp.credit) : '—'}</td>
+															</tr>
+														{/each}
+														{#if line.posting.bank_account}
+															<tr class="border-t border-gray-100 dark:border-gray-800 bg-gray-50/60 dark:bg-gray-850/40">
+																<td class="px-2 py-1 font-mono">{line.posting.bank_account.account_code}</td>
+																<td class="px-2 py-1">
+																	{line.posting.bank_account.account_name}
+																	<span class="text-[9px] text-gray-400 ml-1">({$i18n.t('bank side')})</span>
+																</td>
+																<td class="px-2 py-1 text-right text-gray-400">—</td>
+																<td class="px-2 py-1 text-right text-gray-400">—</td>
+															</tr>
+														{/if}
+													</tbody>
+												</table>
+											</div>
+										{:else if isLineMatched(line)}
+											<div class="mb-3 px-3 py-2 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50/60 dark:bg-red-950/20">
+												<div class="text-[11px] font-medium text-red-700 dark:text-red-300">{$i18n.t('No accounting entry for this line')}</div>
+												<div class="text-[10px] text-red-600/80 dark:text-red-400/70 mt-0.5">
+													{$i18n.t('The line is marked reconciled but nothing was booked to the ledger. Unmatch it and reconcile again, or post the entry manually.')}
+												</div>
+											</div>
+										{/if}
 										<div class="text-[10px] uppercase font-medium text-gray-500 dark:text-gray-400 mb-1.5">{$i18n.t('Matched Entries')}</div>
 										<div class="rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
 											<table class="w-full text-xs">
@@ -1155,7 +1348,7 @@
 							<!-- Match panel (shown below the row when matching) -->
 							{#if matchingLineId === line.id}
 								<tr class="match-popover bg-blue-50/50 dark:bg-blue-950/20">
-									<td colspan="10" class="px-3 py-3">
+									<td colspan="11" class="px-3 py-3">
 										<div class="flex items-center justify-between mb-2">
 											<div class="flex items-center gap-2">
 												<span class="text-xs font-medium text-blue-700 dark:text-blue-300">{$i18n.t('Match to entry')}:</span>

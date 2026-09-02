@@ -8,7 +8,10 @@
 		approveExpense,
 		rejectExpense,
 		receiptBlobUrl,
-		type ExpenseItem
+		updateExpense,
+		getCategories,
+		type ExpenseItem,
+		type ExpenseCategory
 	} from '$lib/apis/expenses';
 	import { createExpenseSheetFromItems } from '$lib/apis/accounting';
 
@@ -72,6 +75,99 @@
 	// Receipt preview modal
 	let previewUrl = '';
 	let previewIsPdf = false;
+
+	// ── Finance correction ──────────────────────────────────────────────
+	// Reviewers fix employee mistakes (wrong category, amount, tax, currency)
+	// without bouncing the claim back. Mirrors the backend rule: editable until
+	// the money moves. The server additionally rejects edits once the parent
+	// sheet's journal entry is built — surfaced via its 409 message.
+	const EDITABLE_STATUSES = ['draft', 'submitted', 'approved'];
+	let categories: ExpenseCategory[] = [];
+	let editing: ExpenseItem | null = null;
+	let saving = false;
+	let form = {
+		expense_date: '',
+		merchant: '',
+		description: '',
+		category_id: '' as string,
+		currency: '',
+		amount: '',
+		tax_amount: '',
+		payment_method: 'personal',
+		reimbursable: true
+	};
+
+	function canEdit(item: ExpenseItem): boolean {
+		return EDITABLE_STATUSES.includes(item.status);
+	}
+
+	async function openEdit(item: ExpenseItem) {
+		editing = item;
+		form = {
+			expense_date: item.expense_date ?? '',
+			merchant: item.merchant ?? '',
+			description: item.description ?? '',
+			category_id: item.category_id != null ? String(item.category_id) : '',
+			currency: item.currency ?? '',
+			amount: item.amount ?? '',
+			tax_amount: item.tax_amount ?? '',
+			payment_method: item.payment_method ?? 'personal',
+			reimbursable: item.reimbursable
+		};
+		if (!categories.length) {
+			try {
+				categories = await getCategories(companyId);
+			} catch {
+				/* non-fatal — the category dropdown just stays empty */
+			}
+		}
+	}
+
+	function closeEdit() {
+		editing = null;
+	}
+
+	async function saveEdit() {
+		if (!editing) return;
+		saving = true;
+		try {
+			// Send only what actually changed so a PATCH never clobbers a field
+			// the reviewer didn't touch.
+			const before = editing;
+			const payload: Record<string, any> = {};
+			if (form.expense_date && form.expense_date !== before.expense_date)
+				payload.expense_date = form.expense_date;
+			if (form.merchant.trim() && form.merchant !== before.merchant)
+				payload.merchant = form.merchant.trim();
+			if (form.description !== before.description) payload.description = form.description;
+			const catId = form.category_id === '' ? null : Number(form.category_id);
+			if (catId !== (before.category_id ?? null) && catId !== null) payload.category_id = catId;
+			if (form.currency && form.currency.toUpperCase() !== before.currency)
+				payload.currency = form.currency.toUpperCase();
+			if (form.amount !== '' && form.amount !== before.amount) payload.amount = form.amount;
+			if (form.tax_amount !== (before.tax_amount ?? '')) payload.tax_amount = form.tax_amount || 0;
+			if (form.payment_method !== before.payment_method)
+				payload.payment_method = form.payment_method;
+			if (form.reimbursable !== before.reimbursable) payload.reimbursable = form.reimbursable;
+
+			if (!Object.keys(payload).length) {
+				closeEdit();
+				return;
+			}
+			await updateExpense(editing.id, payload as any);
+			toast.success('Expense updated');
+			closeEdit();
+			await load();
+		} catch (e: any) {
+			toast.error(e?.detail ?? e?.message ?? 'Could not save changes');
+		} finally {
+			saving = false;
+		}
+	}
+
+	function onEditKey(e: KeyboardEvent) {
+		if (e.key === 'Escape') closeEdit();
+	}
 
 	const FILTERS = [
 		{ key: 'submitted', label: 'To review' },
@@ -267,6 +363,13 @@
 									{:else}
 										<span class="text-xs text-amber-600">no receipt</span>
 									{/if}
+									{#if canEdit(item)}
+										<button
+											class="rounded-md border border-gray-200 px-2 py-1 text-xs hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800"
+											title="Correct this claim"
+											on:click={() => openEdit(item)}>Edit</button
+										>
+									{/if}
 									{#if item.status === 'submitted'}
 										<button
 											disabled={busyId === item.id}
@@ -318,6 +421,141 @@
 					class="rounded-lg bg-gray-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50 dark:bg-white dark:text-gray-900"
 					disabled={bundling || mixedEmployees}
 					on:click={bundle}>{bundling ? 'Bundling…' : 'Bundle into reimbursement sheet'}</button
+				>
+			</div>
+		</div>
+	</div>
+{/if}
+
+{#if editing}
+	<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+		on:click={closeEdit}
+		on:keydown={onEditKey}
+		role="dialog"
+		aria-modal="true"
+		aria-label="Edit expense"
+		tabindex="-1"
+	>
+		<!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+		<div
+			class="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900"
+			on:click|stopPropagation
+		>
+			<div class="mb-4 flex items-start justify-between gap-3">
+				<div>
+					<h3 class="text-base font-semibold text-gray-900 dark:text-gray-100">Correct expense</h3>
+					<p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+						{editing.employee_name ?? 'Employee'} · {editing.status}
+						{#if editing.expense_sheet_id}· on a reimbursement sheet{/if}
+					</p>
+				</div>
+				<button
+					class="rounded-md px-2 py-1 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800"
+					on:click={closeEdit}
+					aria-label="Close">✕</button
+				>
+			</div>
+
+			<div class="grid grid-cols-2 gap-3">
+				<label class="col-span-1 text-xs text-gray-500 dark:text-gray-400">
+					Date
+					<input
+						type="date"
+						bind:value={form.expense_date}
+						class="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+					/>
+				</label>
+				<label class="col-span-1 text-xs text-gray-500 dark:text-gray-400">
+					Category
+					<select
+						bind:value={form.category_id}
+						class="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+					>
+						<option value="">— none —</option>
+						{#each categories as c}
+							<option value={String(c.id)}>{c.label}</option>
+						{/each}
+					</select>
+				</label>
+				<label class="col-span-2 text-xs text-gray-500 dark:text-gray-400">
+					Merchant
+					<input
+						type="text"
+						bind:value={form.merchant}
+						class="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+					/>
+				</label>
+				<label class="col-span-2 text-xs text-gray-500 dark:text-gray-400">
+					Description
+					<input
+						type="text"
+						bind:value={form.description}
+						class="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+					/>
+				</label>
+				<label class="text-xs text-gray-500 dark:text-gray-400">
+					Currency
+					<input
+						type="text"
+						maxlength="3"
+						bind:value={form.currency}
+						class="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm uppercase text-gray-900 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+					/>
+				</label>
+				<label class="text-xs text-gray-500 dark:text-gray-400">
+					Payment
+					<select
+						bind:value={form.payment_method}
+						class="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+					>
+						<option value="personal">Personal</option>
+						<option value="company_card">Company card</option>
+					</select>
+				</label>
+				<label class="text-xs text-gray-500 dark:text-gray-400">
+					Total amount
+					<input
+						type="number"
+						step="0.01"
+						min="0"
+						bind:value={form.amount}
+						class="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+					/>
+				</label>
+				<label class="text-xs text-gray-500 dark:text-gray-400">
+					Tax amount
+					<input
+						type="number"
+						step="0.01"
+						min="0"
+						bind:value={form.tax_amount}
+						class="mt-1 w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-850 dark:text-gray-100"
+					/>
+				</label>
+				<label class="col-span-2 mt-1 flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+					<input type="checkbox" class="rounded" bind:checked={form.reimbursable} />
+					Reimbursable to the employee
+				</label>
+			</div>
+
+			{#if editing.expense_sheet_id}
+				<p class="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+					This expense is bundled on a reimbursement sheet — saving re-calculates that sheet's
+					totals.
+				</p>
+			{/if}
+
+			<div class="mt-5 flex justify-end gap-2">
+				<button
+					class="rounded-lg border border-gray-300 px-3 py-1.5 text-sm dark:border-gray-700 dark:text-gray-200"
+					on:click={closeEdit}>Cancel</button
+				>
+				<button
+					class="rounded-lg bg-gray-900 px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-700 disabled:opacity-50 dark:bg-white dark:text-gray-900"
+					disabled={saving}
+					on:click={saveEdit}>{saving ? 'Saving…' : 'Save changes'}</button
 				>
 			</div>
 		</div>

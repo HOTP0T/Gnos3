@@ -46,23 +46,35 @@
 	};
 
 	// Company base currency + live-rate hint for the exchange-rate field.
-	let baseCurrency = 'USD';
+	let baseCurrency = '';
 	let rateHint = '';
+	let rateMissing = false;
 	let lastShow = false;
 
 	const loadBaseCurrency = async () => {
 		try {
 			const c = await getCompany(companyId);
 			baseCurrency = (c?.currency || 'USD').toUpperCase();
-		} catch {}
+		} catch {
+			if (!baseCurrency) baseCurrency = 'USD';
+		}
 	};
+
+	// Resolve it as soon as the company is known, not just on open, so the form
+	// never renders a foreign default while the lookup is still in flight.
+	$: if (companyId) loadBaseCurrency();
 
 	// Prefill the exchange rate from the resolved live rate (company override →
 	// global → triangulate). The accountant can still override the value.
 	const refreshRate = async () => {
 		const cur = (formData.currency || '').toUpperCase();
 		if (!cur || cur === baseCurrency) {
+			// Back on the base currency: clear any rate left over from a foreign
+			// one. The field is hidden here, so a stale value would be submitted
+			// unseen and scale the entry through every report.
+			formData.exchange_rate = '';
 			rateHint = '';
+			rateMissing = false;
 			return;
 		}
 		try {
@@ -73,19 +85,43 @@
 				amount: 1,
 				as_of: formData.transaction_date || undefined
 			});
-			if (res?.rate) {
+			if (res?.rate && res?.exact) {
 				formData.exchange_rate = String(res.rate);
-				rateHint = $i18n.t('Auto-filled from live rates (as of {{date}})', { date: res.rate_date });
+				rateMissing = false;
+				rateHint = $i18n.t('Auto-filled from live rates ({{date}})', { date: res.rate_date });
+			} else if (res?.rate) {
+				// A rate exists, but for a different month. Showing it would book a
+				// number nobody chose, so offer it as a reference and leave the
+				// field empty for the accountant to confirm or replace.
+				formData.exchange_rate = '';
+				rateMissing = true;
+				rateHint = $i18n.t(
+					"No rate on file for the month of this entry. Nearest available is {{rate}} from {{date}} — enter the rate to use, or add the month under Settings → Exchange Rates.",
+					{ rate: res.rate, date: res.rate_date }
+				);
 			}
 		} catch {
-			rateHint = $i18n.t('No live rate found — defaults to 1.0 unless you set one');
+			formData.exchange_rate = '';
+			rateMissing = true;
+			rateHint = $i18n.t(
+				'No exchange rate available for {{pair}} — enter it below, or add it under Settings → Exchange Rates.',
+				{ pair: `${cur} → ${baseCurrency}` }
+			);
 		}
 	};
 
-	// On each open: load the base currency, then prefill the rate.
+	// On each open: resolve the company's currency FIRST, default a new entry to
+	// it, then prefill the rate. A hardcoded default (it used to be 'USD') means
+	// every entry in a non-USD company opens on a foreign currency and auto-fills
+	// a conversion rate nobody asked for.
 	$: if (show !== lastShow) {
 		lastShow = show;
-		if (show) loadBaseCurrency().then(refreshRate);
+		if (show) {
+			loadBaseCurrency().then(() => {
+				if (!transaction) formData.currency = baseCurrency;
+				refreshRate();
+			});
+		}
 	}
 
 	let invoiceLabel = '';
@@ -112,7 +148,7 @@
 		const tpl = journalTemplates.find((t: any) => t.id === templateId);
 		if (!tpl) return;
 		formData.transaction_type = tpl.transaction_type || 'journal';
-		formData.currency = tpl.currency || 'USD';
+		formData.currency = tpl.currency || baseCurrency || 'USD';
 		formData.reference = tpl.reference_prefix || '';
 		formData.description = tpl.description || '';
 		lines = (tpl.lines_template || []).map((l: any) => {
@@ -273,7 +309,7 @@
 			formData = {
 				transaction_date: transaction.transaction_date?.slice(0, 10) ?? '',
 				transaction_type: transaction.transaction_type ?? 'journal',
-				currency: transaction.currency ?? 'USD',
+				currency: transaction.currency ?? baseCurrency ?? 'USD',
 				exchange_rate: transaction.exchange_rate != null ? String(transaction.exchange_rate) : '',
 				reference: transaction.reference ?? '',
 				description: transaction.description ?? '',
@@ -299,7 +335,7 @@
 			formData = {
 				transaction_date: new Date().toISOString().slice(0, 10),
 				transaction_type: 'others',
-				currency: 'USD',
+				currency: baseCurrency || 'USD',
 				exchange_rate: '',
 				reference: '',
 				description: '',
@@ -716,7 +752,13 @@
 						disabled={readOnly}
 					/>
 					{#if rateHint}
-						<div class="text-[10px] text-gray-400 dark:text-gray-500 mt-1">{rateHint}</div>
+						<div
+							class="text-[10px] mt-1 {rateMissing
+								? 'text-amber-600 dark:text-amber-400'
+								: 'text-gray-400 dark:text-gray-500'}"
+						>
+							{rateHint}
+						</div>
 					{/if}
 				</div>
 			{/if}

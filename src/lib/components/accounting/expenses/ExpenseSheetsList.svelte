@@ -6,6 +6,7 @@
 		getExpenseSheets,
 		getEmployees,
 		generateExpenseSheet,
+		createExpenseSheet,
 		getExpenseSheetCandidates,
 		getPendingReimbursableInvoices,
 		downloadExpenseSheetsPdf
@@ -48,7 +49,10 @@
 			period_start: p.start,
 			period_end: p.end,
 			title: '',
-			include_uncategorized: true
+			include_uncategorized: true,
+			// Start empty: create the sheet now and attach receipts afterwards,
+			// instead of auto-pulling every eligible invoice in the period.
+			start_empty: false
 		};
 	})();
 	let candidatePreview: { total: number } | null = null;
@@ -146,13 +150,23 @@
 		}
 		generating = true;
 		try {
-			const sheet = await generateExpenseSheet(companyId, {
-				employee_id: genForm.employee_id,
-				period_start: genForm.period_start,
-				period_end: genForm.period_end,
-				title: genForm.title || undefined,
-				include_uncategorized: genForm.include_uncategorized
-			});
+			// Two different endpoints: /generate auto-populates from the period,
+			// while the plain create with auto_populate:false leaves it empty.
+			const sheet = genForm.start_empty
+				? await createExpenseSheet(companyId, {
+						employee_id: genForm.employee_id,
+						period_start: genForm.period_start,
+						period_end: genForm.period_end,
+						title: genForm.title || undefined,
+						auto_populate: false
+					})
+				: await generateExpenseSheet(companyId, {
+						employee_id: genForm.employee_id,
+						period_start: genForm.period_start,
+						period_end: genForm.period_end,
+						title: genForm.title || undefined,
+						include_uncategorized: genForm.include_uncategorized
+					});
 			toast.success($i18n.t('Expense sheet created'));
 			showGenerate = false;
 			goto(`/accounting/company/${companyId}/expenses/${sheet.id}`);
@@ -382,17 +396,35 @@
 				</div>
 			</div>
 			<label class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-				<input type="checkbox" bind:checked={genForm.include_uncategorized} class="rounded" />
-				{$i18n.t('Include uncategorized invoices')}
+				<input
+					type="checkbox"
+					bind:checked={genForm.include_uncategorized}
+					disabled={genForm.start_empty}
+					class="rounded disabled:opacity-50"
+				/>
+				<span class={genForm.start_empty ? 'opacity-50' : ''}>
+					{$i18n.t('Include uncategorized invoices')}
+				</span>
+			</label>
+			<label class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+				<input
+					type="checkbox"
+					bind:checked={genForm.start_empty}
+					on:change={() => (candidatePreview = null)}
+					class="rounded"
+				/>
+				{$i18n.t('Start empty — add receipts after creating the sheet')}
 			</label>
 			<div class="flex items-center gap-3">
-				<button
-					class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-					on:click={previewCandidates}
-				>
-					{$i18n.t('Preview Candidates')}
-				</button>
-				{#if candidatePreview}
+				{#if !genForm.start_empty}
+					<button
+						class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+						on:click={previewCandidates}
+					>
+						{$i18n.t('Preview Candidates')}
+					</button>
+				{/if}
+				{#if candidatePreview && !genForm.start_empty}
 					<span class="text-xs text-gray-600 dark:text-gray-400">
 						{candidatePreview.total}
 						{$i18n.t('invoice(s) will be included')}
@@ -410,7 +442,11 @@
 					disabled={generating}
 					on:click={handleGenerate}
 				>
-					{generating ? $i18n.t('Generating...') : $i18n.t('Generate')}
+					{generating
+						? $i18n.t('Generating...')
+						: genForm.start_empty
+							? $i18n.t('Create empty sheet')
+							: $i18n.t('Generate')}
 				</button>
 			</div>
 		</div>

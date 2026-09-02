@@ -31,6 +31,60 @@
 	let transitionTarget = '';
 	let transitioning = false;
 
+	// ── Sheet details editing ───────────────────────────────────────────
+	// Reference / title / period are fixable after generation. The backend
+	// keeps these editable until the sheet is paid (its JE is posted by then),
+	// so the button follows the same rule.
+	let showEdit = false;
+	let savingEdit = false;
+	let editForm = {
+		reference: '',
+		title: '',
+		period_start: '',
+		period_end: '',
+		notes: ''
+	};
+
+	const openEdit = () => {
+		if (!sheet) return;
+		editForm = {
+			reference: sheet.reference ?? '',
+			title: sheet.title ?? '',
+			period_start: sheet.period_start ?? '',
+			period_end: sheet.period_end ?? '',
+			notes: sheet.notes ?? ''
+		};
+		showEdit = true;
+	};
+
+	const saveEdit = async () => {
+		if (!sheet) return;
+		savingEdit = true;
+		try {
+			// Only send changed fields — a no-op PATCH shouldn't touch the period.
+			const payload: Record<string, any> = {};
+			if (editForm.reference.trim() && editForm.reference.trim() !== sheet.reference)
+				payload.reference = editForm.reference.trim();
+			if (editForm.title !== (sheet.title ?? '')) payload.title = editForm.title;
+			if (editForm.period_start && editForm.period_start !== sheet.period_start)
+				payload.period_start = editForm.period_start;
+			if (editForm.period_end && editForm.period_end !== sheet.period_end)
+				payload.period_end = editForm.period_end;
+			if (editForm.notes !== (sheet.notes ?? '')) payload.notes = editForm.notes;
+
+			if (!Object.keys(payload).length) {
+				showEdit = false;
+				return;
+			}
+			sheet = await updateExpenseSheet(sheetId, payload);
+			toast.success($i18n.t('Sheet updated'));
+			showEdit = false;
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
+		}
+		savingEdit = false;
+	};
+
 	const exportSheet = async (kind: 'pdf' | 'excel') => {
 		try {
 			if (kind === 'pdf') await downloadExpenseSheetPdf(sheetId);
@@ -215,6 +269,15 @@
 				>
 					{$i18n.t('Excel')}
 				</button>
+
+				{#if sheet.status !== 'paid'}
+					<button
+						class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+						on:click={openEdit}
+					>
+						{$i18n.t('Edit details')}
+					</button>
+				{/if}
 
 				{#if sheet.status === 'draft'}
 					<button
@@ -586,6 +649,107 @@
 	{/if}
 
 	<!-- Transition modal -->
+	{#if showEdit}
+		<div
+			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+			on:click={() => (showEdit = false)}
+		>
+			<!-- svelte-ignore a11y-no-static-element-interactions -->
+			<!-- svelte-ignore a11y-click-events-have-key-events -->
+			<div
+				class="w-full max-w-md rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800"
+				on:click|stopPropagation
+			>
+				<div
+					class="px-4 py-3 border-b border-gray-200 dark:border-gray-800 text-sm font-semibold dark:text-gray-200"
+				>
+					{$i18n.t('Edit sheet details')}
+				</div>
+				<div class="p-4 space-y-3">
+					<div>
+						<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1"
+							>{$i18n.t('Reference')}</label
+						>
+						<input
+							type="text"
+							bind:value={editForm.reference}
+							class="w-full text-sm font-mono rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden"
+						/>
+						<p class="mt-1 text-[11px] text-gray-400">
+							{$i18n.t('Must be unique within this company.')}
+						</p>
+					</div>
+					<div>
+						<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1"
+							>{$i18n.t('Sheet name')}</label
+						>
+						<input
+							type="text"
+							bind:value={editForm.title}
+							class="w-full text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden"
+						/>
+					</div>
+					<div class="grid grid-cols-2 gap-3">
+						<div>
+							<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1"
+								>{$i18n.t('Period start')}</label
+							>
+							<input
+								type="date"
+								bind:value={editForm.period_start}
+								class="w-full text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden"
+							/>
+						</div>
+						<div>
+							<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1"
+								>{$i18n.t('Period end')}</label
+							>
+							<input
+								type="date"
+								bind:value={editForm.period_end}
+								class="w-full text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden"
+							/>
+						</div>
+					</div>
+					<div>
+						<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1"
+							>{$i18n.t('Notes')}</label
+						>
+						<input
+							type="text"
+							bind:value={editForm.notes}
+							class="w-full text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden"
+						/>
+					</div>
+					{#if sheet && sheet.status !== 'draft'}
+						<p class="rounded-lg bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+							{$i18n.t(
+								'This sheet is already past draft — changing its details does not alter the amounts or the journal entry.'
+							)}
+						</p>
+					{/if}
+				</div>
+				<div
+					class="px-4 py-3 border-t border-gray-200 dark:border-gray-800 flex justify-end gap-2"
+				>
+					<button
+						class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+						on:click={() => (showEdit = false)}
+					>
+						{$i18n.t('Cancel')}
+					</button>
+					<button
+						class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-50"
+						disabled={savingEdit}
+						on:click={saveEdit}
+					>
+						{savingEdit ? $i18n.t('Saving...') : $i18n.t('Save')}
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	{#if transitionTarget}
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"

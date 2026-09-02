@@ -9,6 +9,8 @@
 		deleteGlobalExchangeRate,
 		bulkImportGlobalExchangeRates,
 		fetchGlobalRatesNow,
+		getGlobalRateCoverage,
+		backfillGlobalRates,
 		downloadExchangeRateTemplate
 	} from '$lib/apis/accounting';
 
@@ -41,6 +43,49 @@
 	let fetchSource = 'frankfurter';
 	let fetchDate = today(); // which month "Fetch now" pulls (any past date works)
 	let fetching = false;
+
+	// Coverage: months with no rates on file. A gap is what makes a backdated
+	// entry fall back to another month's rate, so it is worth surfacing.
+	let coverage: { start?: string; end?: string; bases?: string[]; missing?: any[] } | null = null;
+	let backfilling = false;
+
+	$: missingMonths = coverage?.missing
+		? [...new Set(coverage.missing.map((m: any) => m.month))].sort()
+		: [];
+
+	const loadCoverage = async () => {
+		try {
+			coverage = await getGlobalRateCoverage();
+		} catch {
+			coverage = null;
+		}
+	};
+
+	const handleBackfill = async () => {
+		backfilling = true;
+		try {
+			const res = await backfillGlobalRates({ source: fetchSource });
+			const failed: string[] = res?.months_failed ?? [];
+			if (res?.fetched)
+				toast.success(
+					$i18n.t('Filled {{count}} rates across {{months}} month(s)', {
+						count: res.fetched,
+						months: res.months
+					})
+				);
+			else if (!failed.length) toast.success($i18n.t('Every month already covered'));
+			if (failed.length)
+				toast.error(
+					$i18n.t('Could not reach the rate source for {{months}} — add those by hand below.', {
+						months: failed.join(', ')
+					})
+				);
+			await Promise.all([loadRates(), loadCoverage()]);
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
+		}
+		backfilling = false;
+	};
 
 	// Create form
 	let showAddForm = false;
@@ -239,6 +284,7 @@
 
 	onMount(() => {
 		loadRates();
+		loadCoverage();
 	});
 </script>
 
@@ -317,6 +363,43 @@
 	<div class="text-[10px] text-gray-400 dark:text-gray-500 px-0.5 mb-3">
 		{$i18n.t('“Fetch now” pulls rates for the selected month, per company base currency. Pick a past date to backfill previous months. Manual rates are never overwritten.')}
 	</div>
+
+	<!-- Coverage: which months have no rates at all -->
+	{#if coverage}
+		<div
+			class="flex items-start gap-3 flex-wrap px-3 py-2.5 mb-3 rounded-lg border {missingMonths.length
+				? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-950/20'
+				: 'border-gray-100 dark:border-gray-850 bg-gray-50/60 dark:bg-gray-900/40'}"
+		>
+			<div class="flex-1 min-w-[16rem]">
+				{#if missingMonths.length}
+					<div class="text-xs font-medium text-amber-700 dark:text-amber-300">
+						{$i18n.t('{{count}} month(s) have no rates on file', { count: missingMonths.length })}
+					</div>
+					<div class="text-[10px] text-amber-600/80 dark:text-amber-400/70 mt-0.5">
+						{missingMonths.slice(0, 12).join(', ')}{missingMonths.length > 12 ? ' …' : ''}
+					</div>
+					<div class="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
+						{$i18n.t('An entry dated in one of these months has no rate of its own. Fill the gaps below, or add the pair by hand — entries will ask for the rate rather than borrow another month\'s.')}
+					</div>
+				{:else}
+					<div class="text-xs text-gray-600 dark:text-gray-300">
+						{$i18n.t('Every month from {{start}} to {{end}} has rates on file.', {
+							start: coverage.start,
+							end: coverage.end
+						})}
+					</div>
+				{/if}
+			</div>
+			<button
+				class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition disabled:opacity-50 shrink-0"
+				disabled={backfilling || !missingMonths.length}
+				on:click={handleBackfill}
+			>
+				{backfilling ? $i18n.t('Filling...') : $i18n.t('Fill missing months')}
+			</button>
+		</div>
+	{/if}
 
 	<!-- Coverage caveat -->
 	<div class="text-[11px] text-amber-600 dark:text-amber-400/80 px-0.5 mb-3">

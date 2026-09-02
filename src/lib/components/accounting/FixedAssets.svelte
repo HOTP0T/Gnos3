@@ -29,6 +29,9 @@
 	let assets: any[] = [];
 	let accounts: any[] = [];
 
+	// "As of" month for the accumulated-depreciation / book-value view (YYYY-MM)
+	let asOfMonth = '';
+
 	// Company default fixed-asset accounts (customizable) + Excel import
 	let defaultAssetAccountId: number | '' = '';
 	let defaultDepreciationAccountId: number | '' = '';
@@ -72,6 +75,14 @@
 		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 	};
 
+	// The "as of" date = last day of the chosen month (undefined → backend uses today)
+	const asOfEndDate = (): string | undefined => {
+		if (!asOfMonth) return undefined;
+		const [y, m] = asOfMonth.split('-').map(Number);
+		const last = new Date(y, m, 0).getDate();
+		return `${asOfMonth}-${String(last).padStart(2, '0')}`;
+	};
+
 	function buildMonthOptions(periods: any[]) {
 		const options: typeof monthOptions = [];
 		for (const p of periods) {
@@ -106,7 +117,7 @@
 	const loadAssets = async () => {
 		loading = true;
 		try {
-			const res = await getFixedAssets(companyId);
+			const res = await getFixedAssets(companyId, asOfEndDate());
 			assets = Array.isArray(res) ? res : res?.items ?? [];
 		} catch (err) {
 			toast.error(`${$i18n.t('Failed to load fixed assets')}: ${err}`);
@@ -115,6 +126,8 @@
 	};
 
 	onMount(async () => {
+		const now0 = new Date();
+		asOfMonth = `${now0.getFullYear()}-${String(now0.getMonth() + 1).padStart(2, '0')}`;
 		try {
 			const [, acctRes, periodRes, companyRes] = await Promise.all([
 				loadAssets(),
@@ -668,7 +681,23 @@
 		{/if}
 	</div>
 
-	<!-- Assets Table -->
+	<!-- As-of selector + Assets Table -->
+	<div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+		<div class="text-sm font-medium dark:text-gray-200">{$i18n.t('Asset Register')}</div>
+		<div class="flex items-center gap-2">
+			<label for="asset-asof" class="text-xs font-medium text-gray-500 dark:text-gray-400">
+				{$i18n.t('Accumulated depreciation as of')}
+			</label>
+			<input
+				id="asset-asof"
+				type="month"
+				bind:value={asOfMonth}
+				on:change={loadAssets}
+				class="text-sm rounded-lg px-3 py-1.5 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden"
+			/>
+		</div>
+	</div>
+
 	{#if loading}
 		<div class="flex justify-center my-10">
 			<Spinner className="size-5" />

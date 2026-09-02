@@ -753,6 +753,18 @@ export const bulkImportGlobalExchangeRates = async (rates: any[]) =>
 export const fetchGlobalRatesNow = async (params?: { source?: string; effective_date?: string; force?: boolean }) =>
 	apiPost('/exchange-rates/global/fetch', {}, (params ?? {}) as any);
 
+// Which months have no rates on file. A gap here is what makes a backdated
+// entry fall back to another month's rate.
+export const getGlobalRateCoverage = async (params?: { start?: string; end?: string }) =>
+	apiGet('/exchange-rates/global/coverage', (params ?? {}) as any);
+
+export const backfillGlobalRates = async (params?: {
+	start?: string;
+	end?: string;
+	source?: string;
+	force?: boolean;
+}) => apiPost('/exchange-rates/global/backfill', {}, (params ?? {}) as any);
+
 // ─── Tax Declaration (Country-Aware) ─────────────────────────────────
 
 export const getTaxConfig = async (companyId: number) =>
@@ -808,8 +820,8 @@ export const yearEndClose = async (companyId: number, data: { fiscal_year_start:
 
 // ─── Fixed Assets ────────────────────────────────────────────────────
 
-export const getFixedAssets = async (companyId: number) =>
-	apiGet('/fixed-assets', { company_id: companyId });
+export const getFixedAssets = async (companyId: number, asOf?: string) =>
+	apiGet('/fixed-assets', { company_id: companyId, as_of: asOf });
 
 export const createFixedAsset = async (companyId: number, data: Record<string, any>) =>
 	apiPost('/fixed-assets', data, { company_id: companyId });
