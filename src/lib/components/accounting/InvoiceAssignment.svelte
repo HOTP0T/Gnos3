@@ -11,6 +11,7 @@
 		bulkAssignInvoices,
 		bulkUnassignInvoices,
 		confirmInvoiceCategory,
+		getBookingPreview,
 		getAccounts,
 		getAccountingAiStatus,
 		aiCategorizeInvoice,
@@ -157,41 +158,147 @@
 		}
 	};
 
-	// Account picker state
+	// ── Booking dialog ───────────────────────────────────────────────────
+	// Shows the full entry (expense/revenue, VAT, counterparty) before it is
+	// created. Every account comes from the human here, a rule, or a confirmed
+	// mapping; the dialog will not create an entry with a line left unresolved.
 	let pickerInvoiceId: number | null = null;
+	let pickerInvoice: any = null;
 	let pickerMainCode = '';
 	let pickerMainSearch = '';
+	let bookingPlan: any = null;
+	let bookingLoading = false;
+	let pickCounterpartyId: number | '' = '';
+	let pickTaxId: number | '' = '';
+	let splitMode = false;
+	let splitLines: Array<{ account_id: number | null; amount: number | null; description: string }> = [];
+	let lineSearch: Record<string, string> = {};
+	let editingLine: string | null = null; // role whose account picker is open
 
-	const openAccountPicker = (inv: any) => {
-		pickerMainCode = inv.final_account_code || inv.suggested_account_code || '';
+	$: parentIds = new Set(accountsList.map((a: any) => a.parent_id).filter(Boolean));
+	$: leafAccounts = accountsList.filter((a: any) => !parentIds.has(a.id));
+	const accountById = (id: number | null | '') => accountsList.find((a: any) => a.id === id);
+
+	const openAccountPicker = async (inv: any) => {
+		pickerInvoice = inv;
+		pickerMainCode = inv.final_account_code || '';
 		pickerMainSearch = '';
+		bookingPlan = null;
+		pickCounterpartyId = '';
+		pickTaxId = '';
+		splitMode = false;
+		splitLines = [];
+		lineSearch = {};
+		editingLine = null;
 		pickerInvoiceId = inv.id;
+		if (pickerMainCode) await refreshPlan();
 	};
 
 	const handleConfirmCategory = async (inv: any) => {
-		openAccountPicker(inv);
+		await openAccountPicker(inv);
 	};
 
 	const closePicker = () => {
 		pickerInvoiceId = null;
+		pickerInvoice = null;
 		pickerMainCode = '';
+		bookingPlan = null;
 	};
 
-	const handleConfirmPicker = async () => {
+	const refreshPlan = async () => {
 		if (!pickerInvoiceId || !pickerMainCode) {
-			toast.error($i18n.t('Please select an account'));
+			bookingPlan = null;
 			return;
 		}
+		bookingLoading = true;
+		try {
+			const plan = await getBookingPreview(pickerInvoiceId, {
+				account_code: pickerMainCode,
+				counterparty_account_id: pickCounterpartyId === '' ? undefined : Number(pickCounterpartyId),
+				tax_account_id: pickTaxId === '' ? undefined : Number(pickTaxId)
+			});
+			bookingPlan = plan;
+			// Adopt what the engine resolved (rule / mapping / defaults) as the
+			// current choice, so it is visible and can be changed.
+			for (const l of plan.lines ?? []) {
+				if (l.role === 'counterparty' && l.account_id && pickCounterpartyId === '') pickCounterpartyId = l.account_id;
+				if (l.role === 'tax' && l.account_id && pickTaxId === '') pickTaxId = l.account_id;
+			}
+			if (!splitMode) {
+				const main = (plan.lines ?? []).find((l: any) => l.role === 'main');
+				splitLines = main
+					? [{ account_id: main.account_id ?? null, amount: main.amount, description: main.description ?? '' }]
+					: [];
+			}
+		} catch (err: any) {
+			toast.error(err?.detail ?? `${err}`);
+			bookingPlan = null;
+		}
+		bookingLoading = false;
+	};
+
+	const chooseMain = async (code: string) => {
+		pickerMainCode = code;
+		editingLine = null;
+		await refreshPlan();
+	};
+
+	const chooseLineAccount = async (role: string, id: number) => {
+		if (role === 'counterparty') pickCounterpartyId = id;
+		if (role === 'tax') pickTaxId = id;
+		editingLine = null;
+		await refreshPlan();
+	};
+
+	const candidatesFor = (line: any) => {
+		const q = (lineSearch[line.role] ?? '').toLowerCase();
+		const typeOk = (a: any) =>
+			line.role === 'tax' ? ['liability', 'asset'].includes(a.account_type) : line.role === 'counterparty' ? ['liability', 'asset'].includes(a.account_type) : true;
+		const cands = (line.candidates ?? []).map((c: any) => c.id);
+		return leafAccounts
+			.filter((a: any) => typeOk(a) && (!q || a.code.includes(q) || a.name.toLowerCase().includes(q)))
+			.sort((a: any, b: any) => (cands.includes(b.id) ? 1 : 0) - (cands.includes(a.id) ? 1 : 0) || a.code.localeCompare(b.code))
+			.slice(0, 60);
+	};
+
+	const SOURCE_LABEL: Record<string, string> = {
+		human: 'chosen',
+		rule: 'from rule',
+		mapped: 'Tax → Accounts',
+		default: 'country default — confirm',
+		company: 'company default',
+		missing: 'account required'
+	};
+	const sourceClass = (src: string) =>
+		src === 'missing'
+			? 'bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300'
+			: src === 'default'
+				? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300'
+				: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300';
+
+	$: splitTotal = Math.round(splitLines.reduce((s, l) => s + (l.amount ?? 0), 0) * 100) / 100;
+	$: splitOk = !splitMode || (splitLines.length > 0 && splitLines.every((l) => l.account_id) && Math.abs(splitTotal - (bookingPlan?.subtotal ?? 0)) < 0.005);
+	$: planReady = !!bookingPlan && !bookingLoading && bookingPlan.complete && splitOk;
+
+	const handleConfirmPicker = async () => {
+		if (!pickerInvoiceId || !pickerMainCode || !planReady) return;
 		const invoiceId = pickerInvoiceId;
-		const mainCode = pickerMainCode;
+		const payload: any = {
+			account_code: pickerMainCode,
+			counterparty_account_id: pickCounterpartyId === '' ? undefined : Number(pickCounterpartyId),
+			tax_account_id: pickTaxId === '' ? undefined : Number(pickTaxId)
+		};
+		if (splitMode) payload.main_lines = splitLines.map((l) => ({ account_id: l.account_id, amount: l.amount ?? 0, description: l.description }));
 		closePicker();
 		aiProcessingIds.add(invoiceId);
 		aiProcessingIds = aiProcessingIds;
 		aiActivity = $i18n.t('Creating draft entry...');
 		try {
-			const result = await confirmInvoiceCategory(invoiceId, mainCode);
+			const result = await confirmInvoiceCategory(invoiceId, payload);
 			const txnId = result?.transaction_id;
-			if (txnId) {
+			if (txnId && result?.booking_gaps?.length) {
+				toast.warning($i18n.t('Draft entry') + ` #${txnId} ` + $i18n.t('created with lines still needing an account — open it in Entries'));
+			} else if (txnId) {
 				toast.success($i18n.t('Draft entry') + ` #${txnId} ` + $i18n.t('created'));
 			} else {
 				toast.success($i18n.t('Account confirmed'));
@@ -413,8 +520,9 @@
 		aiCategorizing = true;
 		try {
 			const result = await aiCategorizeAll(companyId);
-			toast.success($i18n.t(`AI categorized ${result.categorized} of ${result.total_invoices} invoice(s)`));
-			await loadCompanyInvoices();
+			toast.success(
+				result.message ?? $i18n.t('{{n}} invoice(s) queued for AI suggestion — refresh to see them as they complete', { n: result.queued ?? 0 })
+			);
 		} catch (e) {
 			toast.error($i18n.t('AI categorization failed'));
 		} finally {
@@ -1005,30 +1113,43 @@
 	/>
 {/if}
 
-<!-- Account Picker Modal — MUST be outside the {#if loading}{:else} block to avoid re-renders -->
+<!-- Booking dialog — MUST be outside the {#if loading}{:else} block to avoid re-renders -->
 {#if pickerInvoiceId !== null}
 	<!-- svelte-ignore a11y-click-events-have-key-events -->
 	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
-		class="fixed inset-0 bg-black/40 z-[50000] flex items-center justify-center"
+		class="fixed inset-0 bg-black/40 z-[50000] flex items-center justify-center p-4"
 		on:mousedown={closePicker}
 	>
 		<!-- svelte-ignore a11y-click-events-have-key-events -->
 		<!-- svelte-ignore a11y-no-static-element-interactions -->
 		<div
-			class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl p-5 w-96 space-y-3"
+			class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl p-5 w-full max-w-2xl space-y-3 max-h-[90vh] overflow-y-auto"
 			on:mousedown|stopPropagation
 		>
-			<div class="text-sm font-medium dark:text-gray-200">{$i18n.t('Assign Account')}</div>
+			<div class="flex items-baseline justify-between gap-3">
+				<div class="text-sm font-medium dark:text-gray-200">{$i18n.t('Book invoice')}</div>
+				<div class="text-xs text-gray-500 dark:text-gray-400 truncate">
+					{pickerInvoice?.vendor_name ?? ''} · {pickerInvoice?.invoice_number ?? ''} · {pickerInvoice?.total_amount ?? ''} {pickerInvoice?.currency ?? ''}
+				</div>
+			</div>
 
+			<!-- Expense / revenue account -->
 			<div>
-				<label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('Expense / Revenue Account')}</label>
-				{#if pickerMainCode}
+				<div class="flex items-center justify-between mb-1">
+					<label class="block text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Expense / Revenue Account')}</label>
+					{#if pickerMainCode && bookingPlan}
+						<button class="text-[10px] text-blue-600 dark:text-blue-400 hover:underline" on:click={() => { splitMode = !splitMode; if (!splitMode) refreshPlan(); }}>
+							{splitMode ? $i18n.t('Single account') : $i18n.t('Split across accounts')}
+						</button>
+					{/if}
+				</div>
+				{#if pickerMainCode && editingLine !== 'main'}
 					<div class="flex items-center gap-2">
 						<span class="flex-1 text-sm px-3 py-2 rounded-lg border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 dark:text-gray-200 font-mono">
 							{pickerMainCode} — {accountMap[pickerMainCode] || ''}
 						</span>
-						<button class="text-[10px] text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap" on:click={() => { pickerMainCode = ''; }}>{$i18n.t('Change')}</button>
+						<button class="text-[10px] text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap" on:click={() => { editingLine = 'main'; }}>{$i18n.t('Change')}</button>
 					</div>
 				{:else}
 					<input
@@ -1038,10 +1159,10 @@
 						on:input={(e) => { pickerMainSearch = e.currentTarget.value; }}
 					/>
 					<div class="max-h-32 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-						{#each accountsList.filter(a => !pickerMainSearch || a.code.includes(pickerMainSearch) || a.name.toLowerCase().includes(pickerMainSearch.toLowerCase())) as acct}
+						{#each leafAccounts.filter(a => !pickerMainSearch || a.code.includes(pickerMainSearch) || a.name.toLowerCase().includes(pickerMainSearch.toLowerCase())) as acct}
 							<button
 								class="w-full text-left px-3 py-1.5 text-xs hover:bg-blue-50 dark:hover:bg-blue-900/20 transition border-b border-gray-100 dark:border-gray-800 last:border-b-0"
-								on:click={() => { pickerMainCode = acct.code; }}
+								on:click={() => chooseMain(acct.code)}
 							>
 								<span class="font-mono font-medium">{acct.code}</span>
 								<span class="text-gray-500 dark:text-gray-400 ml-1">{acct.name}</span>
@@ -1051,14 +1172,110 @@
 				{/if}
 			</div>
 
-			<p class="text-[10px] text-gray-400 dark:text-gray-500">{$i18n.t('Add the counterparty (AP/AR) later in the Entries tab.')}</p>
+			<!-- Split lines -->
+			{#if splitMode && bookingPlan}
+				<div class="border border-gray-200 dark:border-gray-700 rounded-lg p-2 space-y-1.5">
+					{#each splitLines as sl, i}
+						<div class="flex gap-2 items-center">
+							<select class="flex-1 text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden" bind:value={sl.account_id}>
+								<option value={null}>{$i18n.t('— account —')}</option>
+								{#each leafAccounts.filter(a => ['expense','revenue'].includes(a.account_type)) as a}
+									<option value={a.id}>{a.code} - {a.name}</option>
+								{/each}
+							</select>
+							<input type="number" step="0.01" class="w-28 text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden text-right" bind:value={sl.amount} />
+							<input type="text" placeholder={$i18n.t('Description')} class="flex-1 text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden" bind:value={sl.description} />
+							<button class="text-gray-400 hover:text-red-600 text-sm" on:click={() => { splitLines = splitLines.filter((_, j) => j !== i); }}>×</button>
+						</div>
+					{/each}
+					<div class="flex items-center justify-between text-[11px]">
+						<button class="text-blue-600 dark:text-blue-400 hover:underline" on:click={() => { splitLines = [...splitLines, { account_id: null, amount: null, description: '' }]; }}>+ {$i18n.t('Add line')}</button>
+						<span class={Math.abs(splitTotal - (bookingPlan.subtotal ?? 0)) < 0.005 ? 'text-gray-500' : 'text-red-600 dark:text-red-300'}>
+							{$i18n.t('Lines')}: {splitTotal.toFixed(2)} / {$i18n.t('net')}: {(bookingPlan.subtotal ?? 0).toFixed(2)}
+						</span>
+					</div>
+				</div>
+			{/if}
+
+			<!-- The entry (stays on screen while a selection is re-resolved) -->
+			{#if bookingLoading && !bookingPlan}
+				<div class="flex items-center gap-2 text-xs text-gray-500"><Spinner className="size-4" /> {$i18n.t('Resolving accounts...')}</div>
+			{:else if bookingPlan}
+				<div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden {bookingLoading ? 'opacity-60' : ''}">
+					<table class="w-full text-xs">
+						<thead class="bg-gray-100 dark:bg-gray-800 text-[10px] uppercase text-gray-500 dark:text-gray-400">
+							<tr>
+								<th class="px-2 py-1.5 text-left">{$i18n.t('Line')}</th>
+								<th class="px-2 py-1.5 text-left">{$i18n.t('Account')}</th>
+								<th class="px-2 py-1.5 text-right">{$i18n.t('Debit')}</th>
+								<th class="px-2 py-1.5 text-right">{$i18n.t('Credit')}</th>
+							</tr>
+						</thead>
+						<tbody class="dark:text-gray-200">
+							{#each bookingPlan.lines as line}
+								{#if !(splitMode && line.role === 'main')}
+									<tr class="border-t border-gray-100 dark:border-gray-800 align-top">
+										<td class="px-2 py-1.5">
+											<div class="font-medium">{$i18n.t(line.label)}</div>
+											<div class="text-[10px] text-gray-400">{line.description}</div>
+										</td>
+										<td class="px-2 py-1.5">
+											{#if line.role === 'main'}
+												<span class="font-mono">{line.account_code} <span class="font-sans text-gray-500">{line.account_name}</span></span>
+											{:else if editingLine === line.role}
+												<input
+													type="text"
+													placeholder={$i18n.t('Search accounts...')}
+													class="w-full text-xs rounded-lg px-2 py-1 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-850 dark:text-gray-200 outline-hidden mb-1"
+													on:input={(e) => { lineSearch = { ...lineSearch, [line.role]: e.currentTarget.value }; }}
+												/>
+												<div class="max-h-28 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+													{#each candidatesFor(line) as a}
+														<button class="w-full text-left px-2 py-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-b border-gray-100 dark:border-gray-800 last:border-b-0" on:click={() => chooseLineAccount(line.role, a.id)}>
+															<span class="font-mono font-medium">{a.code}</span> <span class="text-gray-500">{a.name}</span>
+															{#if (line.candidates ?? []).some((c: any) => c.id === a.id)}<span class="ml-1 text-[9px] text-amber-600">{$i18n.t('suggested')}</span>{/if}
+														</button>
+													{/each}
+												</div>
+											{:else}
+												<div class="flex items-center gap-2 flex-wrap">
+													{#if line.account_id}
+														<span class="font-mono">{line.account_code} <span class="font-sans text-gray-500">{line.account_name}</span></span>
+													{/if}
+													<span class="px-1.5 py-0.5 rounded-full text-[9px] font-medium {sourceClass(line.source)}">{$i18n.t(SOURCE_LABEL[line.source] ?? line.source)}</span>
+													<button class="text-[10px] text-blue-600 dark:text-blue-400 hover:underline" on:click={() => { editingLine = line.role; }}>
+														{line.account_id ? $i18n.t('Change') : $i18n.t('Choose')}
+													</button>
+												</div>
+												{#if line.note}<div class="text-[10px] text-amber-700 dark:text-amber-300 mt-0.5">{line.note}</div>{/if}
+											{/if}
+										</td>
+										<td class="px-2 py-1.5 text-right font-mono">{line.debit ? line.debit.toFixed(2) : ''}</td>
+										<td class="px-2 py-1.5 text-right font-mono">{line.credit ? line.credit.toFixed(2) : ''}</td>
+									</tr>
+								{/if}
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				{#each bookingPlan.warnings ?? [] as w}
+					<div class="text-[11px] text-amber-700 dark:text-amber-300">{w}</div>
+				{/each}
+				{#if !bookingPlan.complete}
+					<div class="text-[11px] text-red-700 dark:text-red-300">
+						{$i18n.t('Every line needs an account before the entry can be created — nothing is guessed. Rules (Settings → Rules), Tax → Accounts and the company\'s default AP/AR account fill these in automatically next time.')}
+					</div>
+				{/if}
+			{:else if pickerMainCode === ''}
+				<p class="text-[10px] text-gray-400 dark:text-gray-500">{$i18n.t('Pick the expense / revenue account to see the full entry.')}</p>
+			{/if}
 
 			<div class="flex gap-2 pt-1">
 				<button
 					class="flex-1 text-sm px-3 py-2 rounded-xl bg-gray-900 hover:bg-gray-850 text-white dark:bg-gray-100 dark:hover:bg-white dark:text-gray-800 font-medium transition disabled:opacity-50"
-					disabled={!pickerMainCode}
+					disabled={!planReady}
 					on:click={handleConfirmPicker}
-				>{$i18n.t('Confirm & Create Draft')}</button>
+				>{$i18n.t('Create Draft Entry')}</button>
 				<button
 					class="text-sm px-3 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-300 font-medium transition"
 					on:click={closePicker}

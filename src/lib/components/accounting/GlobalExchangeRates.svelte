@@ -31,27 +31,44 @@
 
 	const today = () => dayjs().format('YYYY-MM-DD');
 
+	const thisMonth = () => dayjs().format('YYYY-MM');
+
+	// Rows land one per publish day per pair, so the table is windowed rather
+	// than listing everything: a month at a time, newest first.
+	const PAGE_LIMIT = 1000;
+
 	// State
 	let loading = true;
 	let rates: any[] = [];
 	// Filters (all applied server-side via the list query).
-	let dateFilter = ''; // month view filter ('' = all months)
+	let monthFilter = thisMonth(); // YYYY-MM; '' = the most recent PAGE_LIMIT rows
 	let filterFrom = ''; // from/base currency
 	let filterTo = ''; // to/quote currency
 
 	// Fetch-now controls
 	let fetchSource = 'frankfurter';
-	let fetchDate = today(); // which month "Fetch now" pulls (any past date works)
+	let fetchDate = today(); // which day "Fetch now" pulls; never later than today
 	let fetching = false;
 
-	// Coverage: months with no rates on file. A gap is what makes a backdated
-	// entry fall back to another month's rate, so it is worth surfacing.
-	let coverage: { start?: string; end?: string; bases?: string[]; missing?: any[] } | null = null;
+	// Coverage: how far the set reaches per base currency, and the stretches
+	// long enough that an entry landing in one would resolve to a stale rate.
+	// Weekends and holidays are not gaps — the ECB does not publish on them.
+	let coverage: {
+		start?: string;
+		end?: string;
+		bases?: any[];
+		gaps?: any[];
+		latest_date?: string | null;
+		stale_days?: number | null;
+		tolerance_days?: number;
+	} | null = null;
 	let backfilling = false;
 
-	$: missingMonths = coverage?.missing
-		? [...new Set(coverage.missing.map((m: any) => m.month))].sort()
-		: [];
+	$: gaps = coverage?.gaps ?? [];
+	// The source publishes once a business day, so a rate a day or two old is
+	// simply the newest one there is. Only past the tolerance is it worth saying.
+	$: ratesAreStale =
+		coverage?.stale_days != null && coverage.stale_days > (coverage.tolerance_days ?? 7);
 
 	const loadCoverage = async () => {
 		try {
@@ -65,21 +82,28 @@
 		backfilling = true;
 		try {
 			const res = await backfillGlobalRates({ source: fetchSource });
-			const failed: string[] = res?.months_failed ?? [];
+			const failed: string[] = res?.spans_failed ?? [];
+			const notes: string[] = res?.errors ?? [];
 			if (res?.fetched)
 				toast.success(
-					$i18n.t('Filled {{count}} rates across {{months}} month(s)', {
+					$i18n.t('Filled {{count}} rates from {{start}} to {{end}}', {
 						count: res.fetched,
-						months: res.months
+						start: res.start,
+						end: res.end
 					})
 				);
-			else if (!failed.length) toast.success($i18n.t('Every month already covered'));
+			else if (!failed.length && !notes.length)
+				toast.success($i18n.t('Every day already covered'));
 			if (failed.length)
 				toast.error(
-					$i18n.t('Could not reach the rate source for {{months}} — add those by hand below.', {
-						months: failed.join(', ')
+					$i18n.t('Could not reach the rate source for {{spans}} — add those by hand below.', {
+						spans: failed.join(', ')
 					})
 				);
+			else if (notes.length)
+				// e.g. a latest-only source asked for history it cannot serve. Not a
+				// connectivity failure, so it must not read like one.
+				toast.error(notes.slice(0, 3).join('; '));
 			await Promise.all([loadRates(), loadCoverage()]);
 		} catch (err: any) {
 			toast.error(err?.detail ?? `${err}`);
@@ -113,8 +137,9 @@
 		});
 	};
 
-	// Rows are stored dated the 1st of their month.
+	// Rows carry the day the source published them for.
 	const formatDate = (val: any) => (val ? dayjs(val).format('YYYY-MM-DD') : '-');
+	const formatDay = (val: any) => (val ? dayjs(val).format('D MMM YYYY') : '-');
 
 	// ─── Data loading ───────────────────────────────────────────────────────────
 
@@ -126,7 +151,8 @@
 			const res = await getGlobalExchangeRates({
 				from_currency: filterFrom,
 				to_currency: filterTo,
-				effective_date: dateFilter
+				month: monthFilter,
+				limit: PAGE_LIMIT
 			});
 			rates = Array.isArray(res) ? res : res?.items ?? [];
 		} catch (err) {
@@ -138,7 +164,7 @@
 	const clearFilters = () => {
 		filterFrom = '';
 		filterTo = '';
-		dateFilter = '';
+		monthFilter = '';
 		loadRates();
 	};
 
@@ -154,14 +180,19 @@
 			});
 			const fetched = res?.fetched ?? 0;
 			const errs: string[] = res?.errors ?? [];
+			// The source answers with the day it actually published for — over a
+			// weekend that is the preceding business day, not the date asked for.
+			const landedOn = res?.effective_date ?? fetchDate;
 			if (fetched > 0)
-				toast.success($i18n.t('Fetched {{count}} rates', { count: fetched }));
+				toast.success(
+					$i18n.t('Fetched {{count}} rates for {{date}}', { count: fetched, date: landedOn })
+				);
 			else if (errs.length === 0)
-				toast.success($i18n.t('Rates already up to date for this month'));
+				toast.success($i18n.t('Rates already on file for {{date}}', { date: landedOn }));
 			if (errs.length > 0)
 				toast.error(`${$i18n.t('Some bases could not be fetched')}: ${errs.join('; ')}`);
-			// Show the month we just pulled.
-			dateFilter = fetchDate;
+			// Show the month the rates landed in.
+			monthFilter = dayjs(landedOn).format('YYYY-MM');
 			await loadRates();
 		} catch (err: any) {
 			toast.error(err?.detail ?? `${err}`);
@@ -308,7 +339,7 @@
 			<button
 				class="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
 				on:click={() => downloadExchangeRateTemplate()}
-				title={$i18n.t('Download CSV template with example monthly rates')}
+				title={$i18n.t('Download CSV template with example daily rates')}
 			>
 				{$i18n.t('Template')}
 			</button>
@@ -331,16 +362,17 @@
 	<!-- Description -->
 	<div class="text-xs text-gray-400 dark:text-gray-500 px-0.5 mb-3">
 		{$i18n.t(
-			'Shared exchange rates for the whole platform. The 1st-of-month rate applies to the entire month. Each company uses these unless it overrides a rate in its own settings.'
+			'Shared exchange rates for the whole platform, one per publish day. An entry uses the last rate published on or before its date, so weekends and holidays need no rate of their own. Each company uses these unless it overrides a rate in its own settings.'
 		)}
 	</div>
 
 	<!-- Fetch controls -->
 	<div class="flex items-center gap-2 mb-1 px-3 py-2.5 bg-gray-50 dark:bg-gray-850/50 rounded-xl border border-gray-100 dark:border-gray-800 flex-wrap">
-		<label for="global-fetch-month" class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Month')}</label>
+		<label for="global-fetch-day" class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Day')}</label>
 		<input
-			id="global-fetch-month"
+			id="global-fetch-day"
 			type="date"
+			max={today()}
 			bind:value={fetchDate}
 			class="text-xs rounded-lg px-2 py-1.5 border border-gray-200 dark:border-gray-700 bg-transparent dark:text-gray-300"
 		/>
@@ -361,42 +393,80 @@
 	</div>
 	<!-- Fetch helper -->
 	<div class="text-[10px] text-gray-400 dark:text-gray-500 px-0.5 mb-3">
-		{$i18n.t('“Fetch now” pulls rates for the selected month, per company base currency. Pick a past date to backfill previous months. Manual rates are never overwritten.')}
+		{$i18n.t('“Fetch now” pulls that day’s rates, per company base currency. A day the source did not publish on (a weekend, a holiday) lands on the business day before it. Manual rates are never overwritten.')}
 	</div>
 
-	<!-- Coverage: which months have no rates at all -->
+	<!-- Rate freshness. The remark every converting page echoes: which day the
+	     numbers on screen actually come from. -->
+	{#if coverage?.latest_date}
+		<div
+			class="text-[11px] px-0.5 mb-3 {ratesAreStale
+				? 'text-amber-600 dark:text-amber-400'
+				: 'text-gray-400 dark:text-gray-500'}"
+		>
+			{#if ratesAreStale}
+				{$i18n.t(
+					'Live rates last reached {{date}}, {{days}} days ago. Conversions across the platform are using that day’s rate until the source is reachable again.',
+					{ date: formatDay(coverage.latest_date), days: coverage.stale_days }
+				)}
+			{:else}
+				{$i18n.t('Rates current to {{date}}.', { date: formatDay(coverage.latest_date) })}
+			{/if}
+		</div>
+	{/if}
+
+	<!-- Coverage: stretches with no rates at all -->
 	{#if coverage}
 		<div
-			class="flex items-start gap-3 flex-wrap px-3 py-2.5 mb-3 rounded-lg border {missingMonths.length
+			class="flex items-start gap-3 flex-wrap px-3 py-2.5 mb-3 rounded-lg border {gaps.length
 				? 'border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-950/20'
 				: 'border-gray-100 dark:border-gray-850 bg-gray-50/60 dark:bg-gray-900/40'}"
 		>
 			<div class="flex-1 min-w-[16rem]">
-				{#if missingMonths.length}
+				{#if gaps.length}
 					<div class="text-xs font-medium text-amber-700 dark:text-amber-300">
-						{$i18n.t('{{count}} month(s) have no rates on file', { count: missingMonths.length })}
+						{$i18n.t('{{count}} stretch(es) with no rates on file', { count: gaps.length })}
 					</div>
 					<div class="text-[10px] text-amber-600/80 dark:text-amber-400/70 mt-0.5">
-						{missingMonths.slice(0, 12).join(', ')}{missingMonths.length > 12 ? ' …' : ''}
+						{#each gaps.slice(0, 6) as gap}
+							<div>
+								{gap.base} · {gap.start} → {gap.end}
+								<span class="opacity-70"
+									>({$i18n.t('{{count}} day(s)', { count: gap.days })})</span
+								>
+							</div>
+						{/each}
+						{#if gaps.length > 6}<div>…</div>{/if}
 					</div>
 					<div class="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
-						{$i18n.t('An entry dated in one of these months has no rate of its own. Fill the gaps below, or add the pair by hand — entries will ask for the rate rather than borrow another month\'s.')}
+						{$i18n.t(
+							'An entry dated inside one of these has no recent rate to use. Fill the gaps, or add the pair by hand — entries will ask for a rate rather than reach back weeks for one.'
+						)}
 					</div>
 				{:else}
 					<div class="text-xs text-gray-600 dark:text-gray-300">
-						{$i18n.t('Every month from {{start}} to {{end}} has rates on file.', {
+						{$i18n.t('No gaps between {{start}} and {{end}}.', {
 							start: coverage.start,
 							end: coverage.end
 						})}
 					</div>
+					{#if coverage.bases?.length}
+						<div class="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">
+							{#each coverage.bases as b}
+								<span class="mr-2"
+									>{b.base}: {$i18n.t('{{count}} day(s)', { count: b.days_covered })}</span
+								>
+							{/each}
+						</div>
+					{/if}
 				{/if}
 			</div>
 			<button
 				class="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition disabled:opacity-50 shrink-0"
-				disabled={backfilling || !missingMonths.length}
+				disabled={backfilling || !gaps.length}
 				on:click={handleBackfill}
 			>
-				{backfilling ? $i18n.t('Filling...') : $i18n.t('Fill missing months')}
+				{backfilling ? $i18n.t('Filling...') : $i18n.t('Fill gaps')}
 			</button>
 		</div>
 	{/if}
@@ -434,13 +504,14 @@
 			<label for="global-rate-month-view" class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Month')}</label>
 			<input
 				id="global-rate-month-view"
-				type="date"
-				bind:value={dateFilter}
+				type="month"
+				max={thisMonth()}
+				bind:value={monthFilter}
 				on:change={loadRates}
 				class="text-xs rounded-lg px-2 py-1.5 border border-gray-200 dark:border-gray-700 bg-transparent dark:text-gray-300"
 			/>
 		</div>
-		{#if filterFrom || filterTo || dateFilter}
+		{#if filterFrom || filterTo || monthFilter}
 			<button
 				class="text-xs text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100 underline decoration-dotted"
 				on:click={clearFilters}
@@ -481,7 +552,7 @@
 				</button>
 			</div>
 			<div class="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
-				{$i18n.t('The date is applied to its whole calendar month (stored as the 1st).')}
+				{$i18n.t('The rate is stored on this exact day and applies until a later one supersedes it. A rate you enter by hand also holds against the auto-fetch for the rest of its month.')}
 			</div>
 		</div>
 	{/if}
@@ -492,7 +563,7 @@
 	{:else if rates.length === 0}
 		<div class="bg-white dark:bg-gray-900 rounded-xl p-8 border border-gray-100/30 dark:border-gray-850/30 text-center">
 			<div class="text-gray-400 dark:text-gray-500 text-sm mb-3">{$i18n.t('No exchange rates defined yet.')}</div>
-			<div class="text-gray-400 dark:text-gray-500 text-xs">{$i18n.t('Click "Fetch now" to pull live rates, or add them manually.')}</div>
+			<div class="text-gray-400 dark:text-gray-500 text-xs">{$i18n.t('Nothing for this month. Click "Fetch now" to pull live rates, "Fill gaps" to backfill history, or add them manually.')}</div>
 		</div>
 	{:else}
 		<div class="overflow-x-auto">

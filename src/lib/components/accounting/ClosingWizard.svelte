@@ -215,13 +215,19 @@
 				closing_date: selectedOpt.to,
 				opening_date: openingDate
 			});
-			const txId = result?.id ?? result?.transaction_id ?? '';
-			toast.success(
-				$i18n.t('Opening balances carried forward to next year') + (txId ? ` (ID: ${txId})` : '')
-			);
+			const txId = result?.transaction_id ?? result?.id ?? '';
+			if (!txId) {
+				// Nothing to carry: the result account is flat (year-end entry not posted yet).
+				toast.warning(result?.message ?? $i18n.t('Nothing to carry forward'));
+			} else {
+				toast.success(
+					$i18n.t('Report à nouveau created as a draft — review it in Entries and post it') +
+						` — ${result.amount} ${result.from_account} → ${result.to_account} (ID: ${txId})`
+				);
+			}
 		} catch (err: any) {
 			const msg = err?.detail ?? err?.message ?? String(err);
-			toast.error($i18n.t('Failed to carry forward balances') + ': ' + msg);
+			toast.error($i18n.t('Failed to create report à nouveau') + ': ' + msg);
 		}
 		carryingForward = false;
 	};
@@ -443,11 +449,13 @@
 							class="px-4 py-2 text-sm font-medium rounded-lg border border-amber-500 text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-900/20 transition disabled:opacity-50"
 							disabled={carryingForward}
 							on:click={handleCarryForward}
-							title={$i18n.t('Roll asset/liability/equity closing balances into the next fiscal year as opening balances')}
+							title={$i18n.t(
+								'Creates the report à nouveau as a draft: it moves the closed result into retained earnings on the first day of the next year. You review and post it yourself. Balance-sheet accounts already open at their closing balance, so they are not re-posted. Run this after posting the year-end closing entry.'
+							)}
 						>
 							{carryingForward
-								? $i18n.t('Carrying forward...')
-								: $i18n.t('Carry Forward Opening Balances')}
+								? $i18n.t('Creating...')
+								: $i18n.t('Create Report à Nouveau draft (result → retained earnings)')}
 						</button>
 					</div>
 				</div>

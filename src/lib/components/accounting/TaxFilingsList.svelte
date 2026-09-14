@@ -7,7 +7,8 @@
 		getTaxFilings,
 		markTaxFilingPaid,
 		deleteTaxFiling,
-		getAccounts
+		getAccounts,
+		getTaxPaymentPreview
 	} from '$lib/apis/accounting';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 
@@ -22,8 +23,12 @@
 
 	let payingId: number | null = null;
 	let bankAccountId: number | '' = '';
+	let payableAccountId: number | '' = '';
 	let paidDate = '';
 	let processing = false;
+	// What the payment will debit (one leg per payable) + roles still unmapped.
+	let preview: { legs: any[]; missing: string[]; total: number } | null = null;
+	let previewLoading = false;
 
 	const fmt = (v: any): string => {
 		const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0);
@@ -32,7 +37,10 @@
 	const today = () => new Date().toISOString().slice(0, 10);
 	const fmtDate = (d: any) => (d ? dayjs(d).format('YYYY-MM-DD') : '—');
 
-	$: bankAccounts = accounts.filter((a: any) => !a.account_type || a.account_type === 'asset');
+	$: parentIds = new Set(accounts.map((a: any) => a.parent_id).filter(Boolean));
+	$: leafAccounts = accounts.filter((a: any) => !parentIds.has(a.id));
+	$: bankAccounts = leafAccounts.filter((a: any) => !a.account_type || a.account_type === 'asset');
+	$: payableAccounts = leafAccounts.filter((a: any) => a.account_type === 'liability');
 
 	export async function reload() {
 		loading = true;
@@ -47,7 +55,7 @@
 
 	onMount(async () => {
 		try {
-			const a = await getAccounts({ company_id: companyId });
+			const a = await getAccounts({ company_id: companyId, active: true });
 			accounts = Array.isArray(a) ? a : a?.items ?? a?.accounts ?? [];
 		} catch {
 			accounts = [];
@@ -55,10 +63,24 @@
 		await reload();
 	});
 
-	const startPay = (f: any) => {
+	const loadPreview = async (f: any) => {
+		previewLoading = true;
+		try {
+			preview = await getTaxPaymentPreview(f.id, payableAccountId === '' ? undefined : Number(payableAccountId));
+		} catch (err: any) {
+			preview = null;
+			toast.error(`${$i18n.t('Failed to preview payment')}: ${err?.detail ?? err}`);
+		}
+		previewLoading = false;
+	};
+
+	const startPay = async (f: any) => {
 		payingId = f.id;
 		bankAccountId = '';
+		payableAccountId = '';
 		paidDate = today();
+		preview = null;
+		await loadPreview(f);
 	};
 
 	const confirmPay = async (f: any) => {
@@ -70,7 +92,8 @@
 		try {
 			await markTaxFilingPaid(f.id, {
 				bank_account_id: Number(bankAccountId),
-				paid_date: paidDate || today()
+				paid_date: paidDate || today(),
+				payable_account_id: payableAccountId === '' ? undefined : Number(payableAccountId)
 			});
 			toast.success($i18n.t('Filing marked paid'));
 			payingId = null;
@@ -97,6 +120,12 @@
 	};
 	const statusText = (f: any) =>
 		f.status === 'paid' ? $i18n.t('Paid') : f.overdue ? $i18n.t('Overdue') : $i18n.t('Open');
+	const entryText = (f: any) => {
+		if (!f.settlement_transaction_id) return '—';
+		const st = f.settlement_entry_status;
+		const num = f.settlement_entry_number ? ` ${f.settlement_entry_number}` : ` #${f.settlement_transaction_id}`;
+		return (st === 'posted' ? $i18n.t('Posted') : st === 'voided' ? $i18n.t('Voided') : $i18n.t('Draft')) + num;
+	};
 </script>
 
 <div
@@ -122,6 +151,7 @@
 						<th class="px-3 py-2">{$i18n.t('Period')}</th>
 						<th class="px-3 py-2">{$i18n.t('Due date')}</th>
 						<th class="px-3 py-2 text-right">{$i18n.t('Amount')}</th>
+						<th class="px-3 py-2">{$i18n.t('Entry')}</th>
 						<th class="px-3 py-2">{$i18n.t('Status')}</th>
 						<th class="px-3 py-2 text-right">{$i18n.t('Actions')}</th>
 					</tr>
@@ -134,6 +164,7 @@
 							<td class="px-3 py-2">{fmtDate(f.period_start)} → {fmtDate(f.period_end)}</td>
 							<td class="px-3 py-2">{fmtDate(f.due_date)}</td>
 							<td class="px-3 py-2 text-right font-mono">{fmt(f.tax_amount)} {f.currency ?? ''}</td>
+							<td class="px-3 py-2 text-[11px] text-gray-500 dark:text-gray-400 whitespace-nowrap">{entryText(f)}</td>
 							<td class="px-3 py-2">
 								<span class="px-2 py-0.5 rounded-full text-[10px] font-medium {statusBadge(f)}">
 									{statusText(f)}
@@ -160,7 +191,7 @@
 						</tr>
 						{#if payingId === f.id}
 							<tr class="bg-blue-50/40 dark:bg-blue-900/10 border-b border-gray-100 dark:border-gray-850">
-								<td colspan="5" class="px-3 py-3">
+								<td colspan="6" class="px-3 py-3">
 									<div class="flex flex-wrap items-end gap-3">
 										<div>
 											<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1" for="pay-bank-{f.id}">
@@ -190,7 +221,7 @@
 										</div>
 										<button
 											class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-800 transition disabled:opacity-50"
-											disabled={processing || !bankAccountId}
+											disabled={processing || !bankAccountId || (preview?.missing?.length ?? 0) > 0}
 											on:click={() => confirmPay(f)}
 										>
 											{processing ? $i18n.t('Recording...') : $i18n.t('Record payment')}
@@ -202,9 +233,54 @@
 											{$i18n.t('Cancel')}
 										</button>
 									</div>
-									<div class="text-[10px] text-gray-400 dark:text-gray-500 mt-2">
-										{$i18n.t('Records a payment: debit the tax-payable account, credit the chosen bank account.')}
+									<div class="flex flex-wrap items-end gap-3 mt-3">
+										<div>
+											<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1" for="pay-payable-{f.id}">
+												{$i18n.t('Tax payable account (debit)')}
+											</label>
+											<select
+												id="pay-payable-{f.id}"
+												bind:value={payableAccountId}
+												on:change={() => loadPreview(f)}
+												class="text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden"
+											>
+												<option value="">{$i18n.t('From Tax accounts mapping')}</option>
+												{#each payableAccounts as acct}
+													<option value={acct.id}>{acct.code} - {acct.name}</option>
+												{/each}
+											</select>
+										</div>
 									</div>
+									{#if previewLoading}
+										<div class="text-[10px] text-gray-400 mt-2">{$i18n.t('Loading...')}</div>
+									{:else if preview}
+										<div class="mt-2 text-[11px]">
+											<div class="text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('This payment will debit:')}</div>
+											<table class="text-[11px]">
+												<tbody>
+													{#each preview.legs as leg}
+														<tr>
+															<td class="pr-3 py-0.5 text-gray-600 dark:text-gray-300">{$i18n.t(leg.label)}</td>
+															<td class="pr-3 py-0.5 font-mono {leg.account ? 'dark:text-gray-200' : 'text-red-600 dark:text-red-300'}">
+																{leg.account ? `${leg.account.code} ${leg.account.name}` : $i18n.t('— not mapped —')}
+															</td>
+															<td class="py-0.5 text-right font-mono">{fmt(leg.amount)}</td>
+														</tr>
+													{/each}
+													<tr class="font-medium">
+														<td class="pr-3 py-0.5">{$i18n.t('Credit bank')}</td>
+														<td></td>
+														<td class="py-0.5 text-right font-mono">{fmt(preview.total)}</td>
+													</tr>
+												</tbody>
+											</table>
+											{#if preview.missing.length > 0}
+												<div class="text-red-700 dark:text-red-300 mt-1">
+													{$i18n.t('Map the missing role(s) in the Accounts tab (or pick a tax payable account above) before recording.')}
+												</div>
+											{/if}
+										</div>
+									{/if}
 								</td>
 							</tr>
 						{/if}

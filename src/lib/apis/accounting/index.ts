@@ -426,6 +426,53 @@ export const getCashFlow = async (params: { company_id: number; date_from: strin
 export const exportCashFlow = (params: { company_id: number; date_from: string; date_to: string }) =>
 	downloadFile(`${BASE}/reports/cash-flow/export?${qsOf(params)}`, `cash_flow_${params.date_from}_${params.date_to}.xlsx`);
 
+// ─── Statutory statements (fixed-line filings; the layout follows the company's country) ──
+
+export type StatementLine = {
+	key: string;
+	line_no: number | null;
+	label_zh: string;
+	label_en: string;
+	header: boolean;
+	memo: boolean;
+	is_total: boolean;
+	indent: number;
+	codes: string[];
+	beginning?: string | null;
+	ending?: string | null;
+	months?: Record<string, string>;
+	ytd?: string | null;
+};
+
+export type StatementLayout = {
+	company_id: number;
+	country: string | null;
+	layout: string | null;
+	label: string | null;
+	statements: string[];
+};
+
+export const getStatementLayout = async (companyId: number): Promise<StatementLayout> =>
+	apiGet('/reports/statements/layout', { company_id: companyId } as any);
+
+export const getStatutoryBalanceSheet = async (params: { company_id: number; as_of?: string }) =>
+	apiGet('/reports/statements/balance-sheet', params as any);
+
+export const getStatutoryProfitLoss = async (params: { company_id: number; as_of?: string }) =>
+	apiGet('/reports/statements/profit-loss', params as any);
+
+export const exportStatutoryBalanceSheet = (params: { company_id: number; as_of?: string }) =>
+	downloadFile(
+		`${BASE}/reports/statements/balance-sheet/export?${qsOf(params)}`,
+		`balance_sheet_${params.as_of ?? 'current'}.xlsx`
+	);
+
+export const exportStatutoryProfitLoss = (params: { company_id: number; as_of?: string }) =>
+	downloadFile(
+		`${BASE}/reports/statements/profit-loss/export?${qsOf(params)}`,
+		`profit_loss_${params.as_of ?? 'current'}.xlsx`
+	);
+
 // ─── Configurable dashboard ─────────────────────────────────────────────────
 
 export interface DashboardLayoutWidget {
@@ -508,11 +555,23 @@ export const deleteCategorizationRule = async (ruleId: number) =>
 export const applyCategorizationRule = async (ruleId: number) =>
 	apiPost(`/categorization-rules/${ruleId}/apply`);
 
-export const confirmInvoiceCategory = async (invoiceId: number, accountCode: string, counterpartyAccountCode?: string) =>
-	apiPost(`/invoices/${invoiceId}/confirm-category`, {
-		account_code: accountCode,
-		...(counterpartyAccountCode ? { counterparty_account_code: counterpartyAccountCode } : {})
-	});
+/** Book an invoice: expense/revenue account (or a split), VAT and counterparty accounts. */
+export const confirmInvoiceCategory = async (
+	invoiceId: number,
+	data: {
+		account_code: string;
+		counterparty_account_code?: string;
+		counterparty_account_id?: number;
+		tax_account_id?: number;
+		main_lines?: Array<{ account_id?: number; account_code?: string; amount: number; description?: string }>;
+	}
+) => apiPost(`/invoices/${invoiceId}/confirm-category`, data);
+
+/** The entry booking this invoice would create — each line with its account source, and the gaps. */
+export const getBookingPreview = async (
+	invoiceId: number,
+	params?: { account_code?: string; counterparty_account_id?: number; tax_account_id?: number }
+) => apiGet(`/invoices/${invoiceId}/booking-preview`, params as any);
 
 // ── Audit Trail ───────────────────────────────────────────────────────
 
@@ -738,8 +797,18 @@ export const convertCurrency = async (params: { company_id: number; from_currenc
 // ─── Global (platform) Exchange Rates ────────────────────────────────
 // The shared "main settings" rate set every company reads unless it overrides.
 
-export const getGlobalExchangeRates = async (params?: { from_currency?: string; to_currency?: string; effective_date?: string }) =>
-	apiGet('/exchange-rates/global', (params ?? {}) as any);
+// Rates land one row per publish day per pair, so the list is windowed:
+// newest first, capped by `limit`, narrowable by exact day, by `month`
+// (YYYY-MM), or by a start/end span.
+export const getGlobalExchangeRates = async (params?: {
+	from_currency?: string;
+	to_currency?: string;
+	effective_date?: string;
+	month?: string;
+	start?: string;
+	end?: string;
+	limit?: number;
+}) => apiGet('/exchange-rates/global', (params ?? {}) as any);
 
 export const createGlobalExchangeRate = async (data: Record<string, any>) =>
 	apiPost('/exchange-rates/global', data);
@@ -753,8 +822,10 @@ export const bulkImportGlobalExchangeRates = async (rates: any[]) =>
 export const fetchGlobalRatesNow = async (params?: { source?: string; effective_date?: string; force?: boolean }) =>
 	apiPost('/exchange-rates/global/fetch', {}, (params ?? {}) as any);
 
-// Which months have no rates on file. A gap here is what makes a backdated
-// entry fall back to another month's rate.
+// What the rate set covers per base currency, and where it does not: days on
+// file, the newest rate's age, and `gaps` — stretches long enough that an entry
+// landing in one would resolve to a stale rate rather than a neighbouring
+// business day. Weekends and holidays are not gaps.
 export const getGlobalRateCoverage = async (params?: { start?: string; end?: string }) =>
 	apiGet('/exchange-rates/global/coverage', (params ?? {}) as any);
 
@@ -770,11 +841,40 @@ export const backfillGlobalRates = async (params?: {
 export const getTaxConfig = async (companyId: number) =>
 	apiGet('/reports/tax-config', { company_id: companyId });
 
-export const getTaxDeclaration = async (params: { company_id: number; period_start: string; period_end: string }) =>
+export const getTaxDeclaration = async (params: {
+	company_id: number;
+	period_start: string;
+	period_end: string;
+	opening_credit?: number;
+}) =>
 	apiGet('/reports/tax-declaration', params as any);
 
-export const createTaxEntry = async (companyId: number, entry: any) =>
-	apiPost('/reports/tax-declaration/create-entry', { entry }, { company_id: companyId });
+/** Create a DRAFT settlement entry and attach it to the period's filing. */
+export const createTaxEntry = async (
+	companyId: number,
+	data: {
+		tax_type: string;
+		period_start: string;
+		period_end: string;
+		entry: any;
+		tax_amount?: number;
+		currency?: string;
+		due_date?: string;
+		details?: any;
+	}
+) => apiPost('/reports/tax-declaration/create-entry', data, { company_id: companyId });
+
+// ─── Tax accounts (per-company role → GL account mapping) ────────────
+
+export const getTaxAccounts = async (companyId: number) =>
+	apiGet(`/companies/${companyId}/tax-accounts`);
+
+/** `{ role: [account_id, …] }` — an empty list clears the role back to the country default. */
+export const updateTaxAccounts = async (companyId: number, mappings: Record<string, number[]>) =>
+	apiPut(`/companies/${companyId}/tax-accounts`, { mappings });
+
+export const getTaxPaymentPreview = async (filingId: number, payableAccountId?: number) =>
+	apiGet(`/tax-filings/${filingId}/payment-preview`, { payable_account_id: payableAccountId });
 
 export const getCitDeclaration = async (params: {
 	company_id: number;
@@ -804,6 +904,7 @@ export const exportTaxWorksheet = (params: {
 	period_end: string;
 	prior_year_losses?: number;
 	cit_already_paid?: number;
+	opening_credit?: number;
 }) =>
 	downloadFile(
 		`${BASE}/reports/tax-worksheet/export?${qsOf(params)}`,

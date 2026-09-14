@@ -88,16 +88,27 @@
 			if (res?.rate && res?.exact) {
 				formData.exchange_rate = String(res.rate);
 				rateMissing = false;
-				rateHint = $i18n.t('Auto-filled from live rates ({{date}})', { date: res.rate_date });
+				// Rates publish once a business day, so the rate for an entry dated
+				// over a weekend is Friday's — correct, but worth saying out loud so
+				// the date on the entry and the date on the rate are not read as a
+				// mismatch.
+				rateHint =
+					res.stale_days > 0
+						? $i18n.t(
+								'Auto-filled from the rate published {{date}} ({{days}} day(s) before this entry — the latest on or before it).',
+								{ date: res.rate_date, days: res.stale_days }
+							)
+						: $i18n.t('Auto-filled from live rates ({{date}})', { date: res.rate_date });
 			} else if (res?.rate) {
-				// A rate exists, but for a different month. Showing it would book a
-				// number nobody chose, so offer it as a reference and leave the
-				// field empty for the accountant to confirm or replace.
+				// A rate exists, but the lookup had to reach further back than a
+				// weekend for it. Showing it would book a number nobody chose, so
+				// offer it as a reference and leave the field empty for the
+				// accountant to confirm or replace.
 				formData.exchange_rate = '';
 				rateMissing = true;
 				rateHint = $i18n.t(
-					"No rate on file for the month of this entry. Nearest available is {{rate}} from {{date}} — enter the rate to use, or add the month under Settings → Exchange Rates.",
-					{ rate: res.rate, date: res.rate_date }
+					'No recent rate on file for this entry’s date. The nearest is {{rate}} from {{date}}, {{days}} days earlier — enter the rate to use, or fill the gap under Settings → Exchange Rates.',
+					{ rate: res.rate, date: res.rate_date, days: res.stale_days }
 				);
 			}
 		} catch {
@@ -331,6 +342,20 @@
 					credit: parseFloat(String(l.credit ?? l.credit_amount ?? 0)) || null,
 					description: l.description ?? ''
 				})) ?? [];
+			// Lines the booking engine could not resolve: shown as lines awaiting an
+			// account. Saving with every account chosen clears the gaps server-side.
+			for (const g of transaction.booking_gaps ?? []) {
+				const amt = parseFloat(String(g.amount ?? 0)) || null;
+				lines = [
+					...lines,
+					{
+						account_id: null,
+						debit: g.side === 'debit' ? amt : null,
+						credit: g.side === 'credit' ? amt : null,
+						description: g.description ?? g.label ?? ''
+					}
+				];
+			}
 		} else {
 			formData = {
 				transaction_date: new Date().toISOString().slice(0, 10),
@@ -422,7 +447,8 @@
 	$: totalCredit = lines.reduce((sum, l) => sum + (l.credit ?? 0), 0);
 	$: balanceDiff = Math.round((totalDebit - totalCredit) * 100) / 100;
 	$: isBalanced = balanceDiff === 0;
-	$: canSubmit = !readOnly && !saving && isBalanced && lines.length >= 2;
+	$: allAccountsSet = lines.every((l) => l.account_id !== null && l.account_id !== undefined);
+	$: canSubmit = !readOnly && !saving && isBalanced && lines.length >= 2 && allAccountsSet;
 
 	function addLine() {
 		lines = [...lines, { account_id: null, debit: null, credit: null, description: '' }];

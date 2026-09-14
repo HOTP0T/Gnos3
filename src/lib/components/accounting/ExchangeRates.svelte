@@ -41,7 +41,8 @@
 	let loading = true;
 	let rates: any[] = [];
 
-	// Create form (company overrides only — the 1st-of-month rate applies all month)
+	// Create form (company overrides only — stored on the day given, and holding
+	// from that day until a later override supersedes it)
 	let showAddForm = false;
 	let newFromCurrency = 'USD';
 	let newToCurrency = 'EUR';
@@ -281,7 +282,7 @@
 	<div class="flex items-center gap-2 mb-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-850/50 rounded-xl border border-gray-100 dark:border-gray-800">
 		<span class="text-xs text-gray-500 dark:text-gray-400">
 			{$i18n.t(
-				'This company uses the shared platform rates (Accounting → Settings → Exchange Rates) unless you add an override below. The 1st-of-month rate applies to the whole month.'
+				'This company uses the shared platform rates (Accounting → Settings → Exchange Rates) unless you add an override below. An override applies from its date onward, until a later one replaces it.'
 			)}
 		</span>
 	</div>

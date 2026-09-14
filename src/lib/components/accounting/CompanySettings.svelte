@@ -6,6 +6,7 @@
 	import ChartOfAccounts from '$lib/components/accounting/ChartOfAccounts.svelte';
 	import AccountingPeriods from '$lib/components/accounting/AccountingPeriods.svelte';
 	import CategorizationRules from '$lib/components/accounting/CategorizationRules.svelte';
+	import BookingDefaults from '$lib/components/accounting/BookingDefaults.svelte';
 	import ExchangeRates from '$lib/components/accounting/ExchangeRates.svelte';
 	import FixedAssets from '$lib/components/accounting/FixedAssets.svelte';
 	import RecurringTemplates from '$lib/components/accounting/RecurringTemplates.svelte';
@@ -34,6 +35,7 @@
 		chart: true,
 		periods: true,
 		categorization: true,
+		booking: true,
 		exchange: true,
 		assets: true,
 		recurring: true,
@@ -180,6 +182,37 @@
 				{#key periodKey}
 					<AccountingPeriods {companyId} />
 				{/key}
+			</div>
+		{/if}
+	</div>
+
+	<!-- Booking defaults (default AP / AR) -->
+	<div class="rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden">
+		<!-- svelte-ignore a11y-click-events-have-key-events -->
+		<!-- svelte-ignore a11y-no-static-element-interactions -->
+		<div
+			class="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-850/50 cursor-pointer select-none hover:bg-gray-100 dark:hover:bg-gray-850 transition"
+			on:click={() => toggle('booking')}
+		>
+			<div class="flex items-center gap-2">
+				<svg
+					xmlns="http://www.w3.org/2000/svg"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke-width="2"
+					stroke="currentColor"
+					class="size-4 transition-transform {collapsed.booking ? '-rotate-90' : ''}"
+				>
+					<path stroke-linecap="round" stroke-linejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+				</svg>
+				<span class="text-base font-medium dark:text-gray-200">
+					{$i18n.t('Booking Defaults')}
+				</span>
+			</div>
+		</div>
+		{#if !collapsed.booking}
+			<div class="px-4 pb-3 pt-2" transition:slide={{ duration: 200 }}>
+				<BookingDefaults {companyId} />
 			</div>
 		{/if}
 	</div>

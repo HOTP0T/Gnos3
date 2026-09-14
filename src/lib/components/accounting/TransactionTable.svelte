@@ -653,7 +653,13 @@
 									>
 										{txn.status}
 									</span>
-									{#if isUnbalanced(txn)}
+									{#if txn.booking_gaps?.length}
+										<Tooltip content={$i18n.t('Incomplete — {{n}} line(s) still need an account. Open the entry to choose them.', { n: txn.booking_gaps.length })}>
+											<span class="inline-block px-1.5 py-0.5 rounded-lg text-[10px] font-medium bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-300">
+												{$i18n.t('incomplete')}
+											</span>
+										</Tooltip>
+									{:else if isUnbalanced(txn)}
 										<Tooltip content={$i18n.t('Missing double entry — debits and credits do not balance')}>
 											<span class="inline-flex text-amber-500">
 												<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"

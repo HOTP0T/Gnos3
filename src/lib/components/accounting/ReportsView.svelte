@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { getContext } from 'svelte';
+	import { onMount, getContext } from 'svelte';
 
 	import GeneralLedger from './GeneralLedger.svelte';
 	import TrialBalance from './TrialBalance.svelte';
@@ -7,16 +7,41 @@
 	import BalanceSheet from './BalanceSheet.svelte';
 	import CashFlow from './CashFlow.svelte';
 	import AgingReport from './AgingReport.svelte';
+	import StatutoryStatements from './StatutoryStatements.svelte';
+	import { getStatementLayout, type StatementLayout } from '$lib/apis/accounting';
 
 	const i18n = getContext('i18n');
 
 	export let companyId: number;
 
-	type ReportTab = 'general-ledger' | 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ap-aging' | 'ar-aging';
+	type ReportTab =
+		| 'statements'
+		| 'general-ledger'
+		| 'trial-balance'
+		| 'profit-loss'
+		| 'balance-sheet'
+		| 'cash-flow'
+		| 'ap-aging'
+		| 'ar-aging';
 
 	let activeReport: ReportTab = 'general-ledger';
 
-	const tabs: Array<{ id: ReportTab; label: string }> = [
+	// A company whose country has a prescribed filing layout (today: China,
+	// 小企业会计准则) gets an extra tab holding those statements, and opens on it —
+	// that is the form its accountant actually files.
+	let statementLayout: StatementLayout | null = null;
+	$: hasStatements = !!statementLayout?.layout;
+
+	onMount(async () => {
+		try {
+			statementLayout = await getStatementLayout(companyId);
+			if (statementLayout?.layout) activeReport = 'statements';
+		} catch (err) {
+			console.error('Failed to resolve statement layout:', err);
+		}
+	});
+
+	const baseTabs: Array<{ id: ReportTab; label: string }> = [
 		{ id: 'general-ledger', label: 'General Ledger' },
 		{ id: 'trial-balance', label: 'Trial Balance' },
 		{ id: 'profit-loss', label: 'P&L' },
@@ -25,13 +50,15 @@
 		{ id: 'ap-aging', label: 'AP Aging' },
 		{ id: 'ar-aging', label: 'AR Aging' }
 	];
+
+	$: tabs = hasStatements
+		? [{ id: 'statements' as ReportTab, label: 'Statutory Statements' }, ...baseTabs]
+		: baseTabs;
 </script>
 
 <div class="py-3 space-y-4">
 	<!-- Sub-tab bar -->
-	<div
-		class="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit"
-	>
+	<div class="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
 		{#each tabs as tab}
 			<button
 				class="px-4 py-2 text-sm font-medium rounded-md transition
@@ -46,7 +73,9 @@
 	</div>
 
 	<!-- Report content -->
-	{#if activeReport === 'general-ledger'}
+	{#if activeReport === 'statements'}
+		<StatutoryStatements {companyId} layoutLabel={statementLayout?.label ?? null} />
+	{:else if activeReport === 'general-ledger'}
 		<GeneralLedger {companyId} />
 	{:else if activeReport === 'trial-balance'}
 		<TrialBalance {companyId} />
