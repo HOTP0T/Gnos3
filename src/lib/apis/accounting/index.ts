@@ -362,6 +362,20 @@ export const getPayments = async (params?: {
 	offset?: number;
 }) => apiGet('/payments', params as any);
 
+/** The two lines a payment would book (settled account + bank) and where each account comes from. */
+export const getPaymentPreview = async (params: {
+	company_id: number;
+	direction: string;
+	amount?: number;
+	invoice_id?: number;
+	bank_statement_line_id?: number;
+	payee?: string;
+	payer?: string;
+	reference?: string;
+	debit_account_id?: number;
+	credit_account_id?: number;
+}) => apiGet('/payments/preview', params as any);
+
 export const createPayment = async (data: Record<string, any>, company_id?: number, bank_statement_line_id?: number) =>
 	apiPost('/payments', data, { company_id, bank_statement_line_id });
 
@@ -910,6 +924,17 @@ export const exportTaxWorksheet = (params: {
 		`${BASE}/reports/tax-worksheet/export?${qsOf(params)}`,
 		`${params.tax_type}_${params.period_end}.xlsx`
 	);
+
+// ─── Control-account postings (reclassify, per-line human choice) ────
+
+export const getControlAccountPostings = async (companyId: number) =>
+	apiGet('/control-account-postings', { company_id: companyId, include_voided: true });
+
+export const applyReclassification = async (
+	companyId: number,
+	mappings: Array<{ line_id: number; target_code: string }>,
+	dryRun: boolean
+) => apiPost('/control-account-postings/apply', { mappings, dry_run: dryRun }, { company_id: companyId });
 
 // ─── Closing ─────────────────────────────────────────────────────────
 

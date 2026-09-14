@@ -28,6 +28,21 @@
 	$: invoiceRules = rules.filter((r: any) => (r.rule_type || 'invoice') === 'invoice' && r.status !== 'pending');
 	$: bankFeeRules = rules.filter((r: any) => r.rule_type === 'bank_fee' && r.status !== 'pending');
 
+	// Split of the net across several accounts (invoice rules only).
+	// Fixed amounts first, then percentages of the rest; the remainder lands on the main account.
+	let newSplitLines: Array<{ account_code: string; percent: string; amount: string; description: string }> = [];
+	const addSplit = () => { newSplitLines = [...newSplitLines, { account_code: '', percent: '', amount: '', description: '' }]; };
+	const splitPayload = () =>
+		newSplitLines
+			.filter((l) => l.account_code && (l.percent !== '' || l.amount !== ''))
+			.map((l) => ({
+				account_code: l.account_code,
+				percent: l.percent !== '' ? parseFloat(l.percent) : null,
+				amount: l.amount !== '' ? parseFloat(l.amount) : null,
+				description: l.description || null
+			}));
+	$: expenseAccounts = accounts.filter((a: any) => ['expense', 'revenue', 'liability', 'asset'].includes(a.account_type));
+
 	// Edit mode
 	let editingRule: any = null;
 
@@ -45,6 +60,9 @@
 		newTaxRate = rule.tax_rate ? String(rule.tax_rate) : '';
 		newDefaultDescription = rule.default_description || '';
 		newRuleType = rule.rule_type || 'invoice';
+		newSplitLines = (rule.split_lines || []).map((l: any) => ({
+			account_code: l.account_code ?? '', percent: l.percent ?? '', amount: l.amount ?? '', description: l.description ?? ''
+		}));
 		showForm = true;
 	};
 
@@ -60,6 +78,7 @@
 				tax_account_code: newTaxAccountCode || null,
 				tax_rate: newTaxRate ? parseFloat(newTaxRate) : null,
 				default_description: newDefaultDescription || null,
+				split_lines: newRuleType === 'invoice' ? splitPayload() : null,
 				match_type: newMatchType,
 				priority: newPriority,
 				description_keywords: newDescKeywords ? newDescKeywords.split(',').map((k: string) => k.trim()).filter(Boolean) : null,
@@ -69,7 +88,7 @@
 			editingRule = null;
 			showForm = false;
 			newVendor = ''; newAccountCode = ''; newCounterpartyCode = ''; newDescKeywords = '';
-			newTaxAccountCode = ''; newTaxRate = ''; newDefaultDescription = '';
+			newTaxAccountCode = ''; newTaxRate = ''; newDefaultDescription = ''; newSplitLines = [];
 			newAutoCreateEntry = true; newRuleType = 'invoice';
 			await load();
 		} catch (err: any) { toast.error(err?.detail ?? `${err}`); }
@@ -127,6 +146,7 @@
 				tax_account_code: newTaxAccountCode || null,
 				tax_rate: newTaxRate ? parseFloat(newTaxRate) : null,
 				default_description: newDefaultDescription || null,
+				split_lines: newRuleType === 'invoice' ? splitPayload() : null,
 				match_type: newMatchType,
 				priority: newPriority,
 				description_keywords: newDescKeywords ? newDescKeywords.split(',').map((k: string) => k.trim()).filter(Boolean) : null,
@@ -134,7 +154,7 @@
 			});
 			toast.success($i18n.t('Rule created'));
 			newVendor = ''; newAccountCode = ''; newCounterpartyCode = ''; newDescKeywords = '';
-			newTaxAccountCode = ''; newTaxRate = ''; newDefaultDescription = '';
+			newTaxAccountCode = ''; newTaxRate = ''; newDefaultDescription = ''; newSplitLines = [];
 			newAutoCreateEntry = true; newRuleType = 'invoice'; showForm = false;
 			await load();
 		} catch (err) { toast.error(`${err}`); }
@@ -195,7 +215,7 @@
 				<button
 					class="px-3 py-1 text-xs rounded-lg font-medium transition {newRuleType === 'bank_fee' ? 'bg-amber-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600'}"
 					on:click={() => (newRuleType = 'bank_fee')}
-				>{$i18n.t('Bank Fee Rule')}</button>
+				>{$i18n.t('Bank Line Rule')}</button>
 			</div>
 
 			<!-- Row 1: Match Field + Name Pattern + Account -->
@@ -262,6 +282,30 @@
 					<input type="number" step="0.01" bind:value={newTaxRate} placeholder="e.g. 20" class="w-full text-sm rounded-lg px-3 py-1.5 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden" />
 				</div>
 			</div>
+			{#if newRuleType === 'invoice'}
+				<!-- Split of the net across accounts -->
+				<div class="rounded-lg border border-dashed border-gray-200 dark:border-gray-700 p-2">
+					<div class="flex items-center justify-between mb-1">
+						<span class="text-xs font-medium text-gray-500 dark:text-gray-400">{$i18n.t('Split the net across accounts')} <span class="font-normal text-gray-400">({$i18n.t('optional — e.g. staffing invoice: salary / IIT withheld / fee')})</span></span>
+						<button type="button" class="text-[11px] text-blue-600 dark:text-blue-400 hover:underline" on:click={addSplit}>+ {$i18n.t('Add line')}</button>
+					</div>
+					{#each newSplitLines as sl, i}
+						<div class="flex gap-2 items-center mb-1">
+							<select bind:value={sl.account_code} class="flex-1 text-xs rounded-lg px-2 py-1 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden">
+								<option value="">{$i18n.t('— account —')}</option>
+								{#each expenseAccounts as a}<option value={a.code}>{a.code} - {a.name}</option>{/each}
+							</select>
+							<input type="number" step="0.01" bind:value={sl.percent} placeholder="%" class="w-20 text-xs rounded-lg px-2 py-1 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden text-right" />
+							<input type="number" step="0.01" bind:value={sl.amount} placeholder={$i18n.t('fixed')} class="w-24 text-xs rounded-lg px-2 py-1 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden text-right" />
+							<input type="text" bind:value={sl.description} placeholder={$i18n.t('Description')} class="flex-1 text-xs rounded-lg px-2 py-1 bg-white dark:bg-gray-900 dark:text-gray-200 border border-gray-200 dark:border-gray-700 outline-hidden" />
+							<button type="button" class="text-gray-400 hover:text-red-600" on:click={() => { newSplitLines = newSplitLines.filter((_, j) => j !== i); }}>×</button>
+						</div>
+					{/each}
+					{#if newSplitLines.length}
+						<div class="text-[10px] text-gray-400">{$i18n.t('Fixed amounts are taken first, percentages apply to what is left, and the remainder goes to the main account above.')}</div>
+					{/if}
+				</div>
+			{/if}
 			<!-- Row 3: Description + Auto-entry + Priority + Save -->
 			<div class="flex gap-2 items-end">
 				<div class="flex-1">
@@ -312,7 +356,7 @@
 								<td class="px-3 py-1.5 font-medium">{rule.vendor_name_pattern}</td>
 								<td class="px-2 py-1.5">
 									<span class="px-1.5 py-0.5 rounded text-[10px] font-medium {rule.rule_type === 'bank_fee' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'}">
-										{rule.rule_type === 'bank_fee' ? $i18n.t('Bank Fee') : $i18n.t('Invoice')}
+										{rule.rule_type === 'bank_fee' ? $i18n.t('Bank line') : $i18n.t('Invoice')}
 									</span>
 								</td>
 								<td class="px-2 py-1.5">{accountName(rule.account_code)}</td>
@@ -413,7 +457,10 @@
 		<!-- Bank Fee Rules -->
 		{#if bankFeeRules.length > 0}
 		<div>
-			<h4 class="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase mb-1">{$i18n.t('Bank Fee Rules')}</h4>
+			<h4 class="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase mb-1">{$i18n.t('Bank Line Rules')}</h4>
+			<p class="text-[11px] text-gray-400 dark:text-gray-500 mb-2">
+				{$i18n.t('Match a bank line by its description or payee (e.g. "缴税" → 应交税费, "工资" → 应付职工薪酬, "FRAIS" → 627) — the debit account is what a payment on such a line settles when no invoice is linked. Also used by the Bank Fee button.')}
+			</p>
 			<div class="overflow-x-auto rounded-xl border border-amber-100/50 dark:border-amber-900/30">
 				<table class="w-full text-xs text-left text-gray-700 dark:text-gray-300">
 					<thead class="text-[10px] uppercase bg-amber-50/50 dark:bg-amber-950/20 text-gray-600 dark:text-gray-400">
