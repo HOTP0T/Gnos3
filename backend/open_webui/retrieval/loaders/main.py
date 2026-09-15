@@ -1,4 +1,5 @@
 import asyncio
+import os
 import requests
 import logging
 import ftfy
@@ -23,6 +24,7 @@ from open_webui.retrieval.loaders.external_document import ExternalDocumentLoade
 from open_webui.retrieval.loaders.mistral import MistralLoader
 from open_webui.retrieval.loaders.datalab_marker import DatalabMarkerLoader
 from open_webui.retrieval.loaders.mineru import MinerULoader
+from open_webui.retrieval.loaders.pdf_text_first import TextFirstPdfLoader
 from open_webui.retrieval.loaders.paddleocr_vl import PaddleOCRVLLoader
 
 from open_webui.env import GLOBAL_LOG_LEVEL, REQUESTS_VERIFY, AIOHTTP_CLIENT_SESSION_SSL
@@ -390,6 +392,15 @@ class Loader:
                 params=self.kwargs.get('MINERU_PARAMS', {}),
                 timeout=mineru_timeout,
             )
+            # MinerU's layout model drops/mangles text on born-digital forms; only
+            # send PDFs that are effectively image-only. Set MINERU_TEXT_FIRST=false
+            # to always use MinerU.
+            if os.environ.get('MINERU_TEXT_FIRST', 'true').lower() not in ('false', '0', 'no'):
+                loader = TextFirstPdfLoader(
+                    file_path,
+                    fallback=loader,
+                    mode=self.kwargs.get('PDF_LOADER_MODE', 'page'),
+                )
         elif (
             self.engine == 'mistral_ocr'
             and self.kwargs.get('MISTRAL_OCR_API_KEY') != ''
