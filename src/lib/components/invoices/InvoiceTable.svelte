@@ -124,8 +124,11 @@
 		{ key: 'subtotal', label: 'Subtotal', type: 'number', align: 'right' },
 		{ key: 'tax_amount', label: 'Tax', type: 'number', align: 'right' },
 		{ key: 'total_amount', label: 'Total', type: 'number', align: 'right' },
-		{ key: 'amount_paid', label: 'Paid', type: 'number', align: 'right' },
-		{ key: 'balance_due', label: 'Balance', type: 'number', align: 'right' },
+		// Paid / Balance deliberately absent. They are never read from the document —
+		// no extraction prompt asks for them — they are written only by the accounting
+		// payments code, so showing them here presented accounting state as if it were
+		// extracted invoice data, and made it hand-editable outside the ledger.
+		// Payment status lives in Accounting → Company → Payments.
 		{ key: 'payment_terms', label: 'Terms', type: 'text' },
 		{ key: 'po_number', label: 'PO #', type: 'text' },
 		{ key: 'client_name', label: 'Client', type: 'text', maxLength: 256 },
@@ -143,8 +146,6 @@
 		subtotal: 80,
 		tax_amount: 70,
 		total_amount: 85,
-		amount_paid: 75,
-		balance_due: 80,
 		payment_terms: 100,
 		po_number: 90,
 		client_name: 120,

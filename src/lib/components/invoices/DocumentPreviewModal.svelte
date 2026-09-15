@@ -61,8 +61,8 @@
 		{ key: 'subtotal', label: 'Subtotal', type: 'number', section: 'money' },
 		{ key: 'tax_amount', label: 'Tax', type: 'number', section: 'money' },
 		{ key: 'total_amount', label: 'Total', type: 'number', section: 'money', bold: true },
-		{ key: 'amount_paid', label: 'Paid', type: 'number', section: 'money' },
-		{ key: 'balance_due', label: 'Balance Due', type: 'number', section: 'money' },
+		// Paid / Balance Due deliberately absent — see InvoiceTable. They are accounting
+		// state, never extracted from the document; payment status lives in Accounting.
 		{ key: 'payment_terms', label: 'Payment Terms', type: 'text', section: 'details' },
 		{ key: 'po_number', label: 'PO #', type: 'text', section: 'details' },
 		{ key: 'description', label: 'Description', type: 'text', section: 'details' }

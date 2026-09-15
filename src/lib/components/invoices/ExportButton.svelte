@@ -19,8 +19,8 @@
 		'subtotal',
 		'tax_amount',
 		'total_amount',
-		'amount_paid',
-		'balance_due',
+		// amount_paid / balance_due deliberately absent — accounting state, not
+		// extracted invoice data; exporting them from here published wrong figures.
 		'payment_terms',
 		'po_number',
 		'description',
