@@ -25,10 +25,15 @@
 	let bankAccountId: number | '' = '';
 	let payableAccountId: number | '' = '';
 	let paidDate = '';
+	// CIT: the year's final tax as printed on the assessment notice (blank = as accrued).
+	let assessedAmount: string | number | null = '';
 	let processing = false;
-	// What the payment will debit (one leg per payable) + roles still unmapped.
-	let preview: { legs: any[]; missing: string[]; total: number } | null = null;
+	// What the settlement will book (debit and credit legs) + roles still unmapped.
+	let preview: { legs: any[]; missing: string[]; total: number; bank?: number; warnings?: string[]; over_under?: number; tax_accrued?: number } | null = null;
 	let previewLoading = false;
+	const blank = (v: any) => v === '' || v === null || v === undefined;
+	const assessed = () => (blank(assessedAmount) ? undefined : parseFloat(String(assessedAmount)) || 0);
+	$: isCit = taxType === 'cit';
 
 	const fmt = (v: any): string => {
 		const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0);
@@ -66,7 +71,7 @@
 	const loadPreview = async (f: any) => {
 		previewLoading = true;
 		try {
-			preview = await getTaxPaymentPreview(f.id, payableAccountId === '' ? undefined : Number(payableAccountId));
+			preview = await getTaxPaymentPreview(f.id, payableAccountId === '' ? undefined : Number(payableAccountId), isCit ? assessed() : undefined);
 		} catch (err: any) {
 			preview = null;
 			toast.error(`${$i18n.t('Failed to preview payment')}: ${err?.detail ?? err}`);
@@ -78,6 +83,7 @@
 		payingId = f.id;
 		bankAccountId = '';
 		payableAccountId = '';
+		assessedAmount = '';
 		paidDate = today();
 		preview = null;
 		await loadPreview(f);
@@ -93,9 +99,10 @@
 			await markTaxFilingPaid(f.id, {
 				bank_account_id: Number(bankAccountId),
 				paid_date: paidDate || today(),
-				payable_account_id: payableAccountId === '' ? undefined : Number(payableAccountId)
+				payable_account_id: payableAccountId === '' ? undefined : Number(payableAccountId),
+				assessed_amount: isCit ? assessed() : undefined
 			});
-			toast.success($i18n.t('Filing marked paid'));
+			toast.success((preview?.bank ?? preview?.total ?? 0) > 0 ? $i18n.t('Filing marked paid') : $i18n.t('Filing settled against provisional tax — no bank movement'));
 			payingId = null;
 			await reload();
 		} catch (err: any) {
@@ -171,12 +178,20 @@
 								</span>
 							</td>
 							<td class="px-3 py-2 text-right whitespace-nowrap">
-								{#if f.status !== 'paid'}
+								{#if f.status !== 'paid' && Number(f.tax_amount) <= 0}
+									<span class="text-[10px] text-gray-400" title={$i18n.t('Nothing to pay: the tax office refunds or credits the excess — record the refund as a receipt against the prepaid-tax account.')}>{$i18n.t('Refund / nothing to pay')}</span>
+									<button
+										class="px-2.5 py-1 text-xs font-medium rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-300 transition"
+										on:click={() => remove(f)}
+									>
+										{$i18n.t('Delete')}
+									</button>
+								{:else if f.status !== 'paid'}
 									<button
 										class="px-2.5 py-1 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 transition"
 										on:click={() => startPay(f)}
 									>
-										{$i18n.t('Mark Paid')}
+										{isCit ? $i18n.t('Settle') : $i18n.t('Mark Paid')}
 									</button>
 									<button
 										class="px-2.5 py-1 text-xs font-medium rounded-lg bg-red-50 text-red-700 hover:bg-red-100 dark:bg-red-900/20 dark:text-red-300 transition"
@@ -250,17 +265,33 @@
 												{/each}
 											</select>
 										</div>
+										{#if isCit}
+											<div>
+												<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1" for="pay-assessed-{f.id}">
+													{$i18n.t("Final tax per the assessment notice (the year's tax, before provisional tax)")}
+												</label>
+												<input
+													id="pay-assessed-{f.id}"
+													type="number"
+													step="0.01"
+													bind:value={assessedAmount}
+													on:change={() => loadPreview(f)}
+													placeholder={preview?.tax_accrued !== undefined ? `${$i18n.t('as accrued')}: ${fmt(preview.tax_accrued)}` : $i18n.t('as accrued')}
+													class="text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden w-56"
+												/>
+											</div>
+										{/if}
 									</div>
 									{#if previewLoading}
 										<div class="text-[10px] text-gray-400 mt-2">{$i18n.t('Loading...')}</div>
 									{:else if preview}
 										<div class="mt-2 text-[11px]">
-											<div class="text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('This payment will debit:')}</div>
+											<div class="text-gray-500 dark:text-gray-400 mb-1">{$i18n.t('This will book:')}</div>
 											<table class="text-[11px]">
 												<tbody>
 													{#each preview.legs as leg}
 														<tr>
-															<td class="pr-3 py-0.5 text-gray-600 dark:text-gray-300">{$i18n.t(leg.label)}</td>
+															<td class="pr-3 py-0.5 text-gray-600 dark:text-gray-300">{(leg.side ?? 'debit') === 'debit' ? 'DR' : 'CR'} {$i18n.t(leg.label)}</td>
 															<td class="pr-3 py-0.5 font-mono {leg.account ? 'dark:text-gray-200' : 'text-red-600 dark:text-red-300'}">
 																{leg.account ? `${leg.account.code} ${leg.account.name}` : $i18n.t('— not mapped —')}
 															</td>
@@ -268,12 +299,15 @@
 														</tr>
 													{/each}
 													<tr class="font-medium">
-														<td class="pr-3 py-0.5">{$i18n.t('Credit bank')}</td>
+														<td class="pr-3 py-0.5">{(preview.bank ?? preview.total) > 0 ? `CR ${$i18n.t('Bank')}` : $i18n.t('Nothing to pay from the bank')}</td>
 														<td></td>
-														<td class="py-0.5 text-right font-mono">{fmt(preview.total)}</td>
+														<td class="py-0.5 text-right font-mono">{fmt(preview.bank ?? preview.total)}</td>
 													</tr>
 												</tbody>
 											</table>
+											{#each preview.warnings ?? [] as w}
+												<div class="text-amber-700 dark:text-amber-300 mt-1">{w}</div>
+											{/each}
 											{#if preview.missing.length > 0}
 												<div class="text-red-700 dark:text-red-300 mt-1">
 													{$i18n.t('Map the missing role(s) in the Accounts tab (or pick a tax payable account above) before recording.')}

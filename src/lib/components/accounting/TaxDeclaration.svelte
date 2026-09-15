@@ -30,7 +30,9 @@
 
 	// Credit brought forward from the previous return (上期留抵 / crédit reporté).
 	// Blank = taken from the previous filing (or recomputed); a value overrides it.
-	let openingCreditInput = '';
+	let openingCreditInput: string | number | null = '';
+	// A number input yields a number (or null) once typed into — never call string methods on it.
+	const blank = (v: any) => v === '' || v === null || v === undefined;
 
 	// Month selector
 	let selectedMonth = '';
@@ -122,7 +124,7 @@
 				company_id: companyId,
 				period_start: opt.from,
 				period_end: opt.to,
-				opening_credit: openingCreditInput.trim() === '' ? undefined : parseFloat(openingCreditInput) || 0
+				opening_credit: blank(openingCreditInput) ? undefined : parseFloat(String(openingCreditInput)) || 0
 			});
 		} catch (err: any) {
 			const msg = err?.detail ?? err?.message ?? String(err);
@@ -188,7 +190,7 @@
 				tax_type: 'vat',
 				period_start: declaration.period_start,
 				period_end: declaration.period_end,
-				opening_credit: openingCreditInput.trim() === '' ? undefined : parseFloat(openingCreditInput) || 0
+				opening_credit: blank(openingCreditInput) ? undefined : parseFloat(String(openingCreditInput)) || 0
 			});
 		} catch (err: any) {
 			toast.error(`${$i18n.t('Failed to export')}: ${err?.detail ?? err}`);

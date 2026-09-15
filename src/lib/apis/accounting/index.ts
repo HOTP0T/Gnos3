@@ -889,8 +889,8 @@ export const getTaxAccounts = async (companyId: number) =>
 export const updateTaxAccounts = async (companyId: number, mappings: Record<string, number[]>) =>
 	apiPut(`/companies/${companyId}/tax-accounts`, { mappings });
 
-export const getTaxPaymentPreview = async (filingId: number, payableAccountId?: number) =>
-	apiGet(`/tax-filings/${filingId}/payment-preview`, { payable_account_id: payableAccountId });
+export const getTaxPaymentPreview = async (filingId: number, payableAccountId?: number, assessedAmount?: number) =>
+	apiGet(`/tax-filings/${filingId}/payment-preview`, { payable_account_id: payableAccountId, assessed_amount: assessedAmount });
 
 export type CitAdjustment = { label: string; amount: number; kind: 'add' | 'deduct' };
 
@@ -913,13 +913,14 @@ export const computeCitDeclaration = async (
 		cit_already_paid?: number;
 		provisional_paid?: number;
 		adjustments?: CitAdjustment[];
+		two_tier?: boolean;
 	}
 ) => apiPost('/reports/cit-declaration', data, { company_id: companyId });
 
 /** Provisional (prepaid) income tax demanded by the tax office: DR prepaid tax / CR bank. */
 export const recordProvisionalTaxPayment = async (
 	companyId: number,
-	data: { amount: number; bank_account_id: number; paid_date?: string; reference?: string }
+	data: { amount: number; bank_account_id: number; paid_date?: string; reference?: string; period_end?: string }
 ) => apiPost(`/companies/${companyId}/provisional-tax-payment`, data);
 
 export const getTaxFilings = async (params: { company_id: number; tax_type?: string }) =>
@@ -930,7 +931,7 @@ export const saveTaxFiling = async (companyId: number, data: Record<string, any>
 
 export const markTaxFilingPaid = async (
 	filingId: number,
-	data: { bank_account_id: number; paid_date?: string; payable_account_id?: number }
+	data: { bank_account_id: number; paid_date?: string; payable_account_id?: number; assessed_amount?: number }
 ) => apiPost(`/tax-filings/${filingId}/mark-paid`, data);
 
 export const deleteTaxFiling = async (filingId: number) => apiDelete(`/tax-filings/${filingId}`);
@@ -945,6 +946,7 @@ export const exportTaxWorksheet = (params: {
 	opening_credit?: number;
 	provisional_paid?: number;
 	adjustments?: CitAdjustment[];
+	two_tier?: boolean;
 }) => {
 	const { adjustments, ...rest } = params;
 	const q: Record<string, any> = { ...rest };

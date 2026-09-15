@@ -36,11 +36,18 @@
 	let creating = false;
 	let periodStart = '';
 	let periodEnd = '';
-	let priorYearLosses = '0';
+	// Number inputs yield a number (or null) once typed into — keep them typed loosely
+	// and never call string methods on them.
+	let priorYearLosses: string | number | null = '0';
 	// Blank = let the backend net off the CIT filings already paid inside the period.
-	let citAlreadyPaid = '';
-	// Blank = read the prepaid-tax account's balance from the ledger.
-	let provisionalPaid = '';
+	let citAlreadyPaid: string | number | null = '';
+	// Blank = read the provisional payments recorded for the year.
+	let provisionalPaid: string | number | null = '';
+	const blank = (v: any) => v === '' || v === null || v === undefined;
+	const num = (v: any) => (blank(v) ? undefined : parseFloat(String(v)) || 0);
+	// Hong Kong: only one entity of a connected group may elect the two-tiered rates.
+	let twoTier = true;
+	$: hasTiers = (cfg?.cit_tiers ?? []).length > 1;
 	// The accountant's tax computation: nothing here is inferred.
 	let adjustments: CitAdjustment[] = [];
 	let result: any = null;
@@ -103,6 +110,7 @@
 		}
 		if (d.prior_year_losses) priorYearLosses = String(d.prior_year_losses);
 		if (d.provisional_paid_source === 'manual') provisionalPaid = String(d.provisional_paid ?? '');
+		if (typeof d.two_tier === 'boolean') twoTier = d.two_tier;
 	};
 
 	const fmt = (v: any): string => {
@@ -115,12 +123,37 @@
 	let accounts: any[] = [];
 	$: parentIds = new Set(accounts.map((a: any) => a.parent_id).filter(Boolean));
 	$: bankAccounts = accounts.filter((a: any) => !parentIds.has(a.id) && (!a.account_type || a.account_type === 'asset'));
-	let provAmount = '';
+	let provAmount: string | number | null = '';
 	let provDate = '';
 	let provBank: number | '' = '';
 	let provRef = '';
+	// Fiscal year the instalment relates to (the year printed on the demand note).
+	// Pre-selected from the payment date; the IRD's second instalment is paid
+	// after that year's end, so the accountant may pick the previous year.
+	let provPeriodEnd = '';
 	let recording = false;
 	let showProvisional = false;
+
+	$: provYears = (() => {
+		const t = provDate || today();
+		const curStart = fiscalYearStart(t, fyStartMonth);
+		const out: Array<{ end: string; label: string }> = [];
+		let start = curStart;
+		// one year ahead, then this year and three back
+		{
+			const [y, m] = start.split('-').map(Number);
+			const next = `${y + 1}-${String(m).padStart(2, '0')}-01`;
+			out.push({ end: fiscalYearEnd(next, fyStartMonth), label: fiscalYearLabel(next, fiscalYearEnd(next, fyStartMonth)) });
+		}
+		for (let i = 0; i < 4; i++) {
+			const end = fiscalYearEnd(start, fyStartMonth);
+			out.push({ end, label: fiscalYearLabel(start, end) });
+			const [y, m] = start.split('-').map(Number);
+			start = `${y - 1}-${String(m).padStart(2, '0')}-01`;
+		}
+		return out;
+	})();
+	$: if (provDate && !provYears.some((y) => y.end === provPeriodEnd)) provPeriodEnd = fiscalYearEnd(provDate, fyStartMonth);
 
 	onMount(async () => {
 		try {
@@ -172,10 +205,11 @@
 	const payload = () => ({
 		period_start: periodStart,
 		period_end: periodEnd,
-		prior_year_losses: parseFloat(priorYearLosses) || 0,
-		cit_already_paid: citAlreadyPaid.trim() === '' ? undefined : parseFloat(citAlreadyPaid) || 0,
-		provisional_paid: provisionalPaid.trim() === '' ? undefined : parseFloat(provisionalPaid) || 0,
-		adjustments: adjustments.filter((a) => Number(a.amount)).map((a) => ({ ...a, amount: Number(a.amount) }))
+		prior_year_losses: num(priorYearLosses) ?? 0,
+		cit_already_paid: num(citAlreadyPaid),
+		provisional_paid: num(provisionalPaid),
+		adjustments: adjustments.filter((a) => Number(a.amount)).map((a) => ({ ...a, amount: Number(a.amount) })),
+		two_tier: hasTiers ? twoTier : true
 	});
 
 	const calc = async () => {
@@ -252,7 +286,8 @@
 				prior_year_losses: p.prior_year_losses,
 				cit_already_paid: p.cit_already_paid,
 				provisional_paid: p.provisional_paid,
-				adjustments: p.adjustments
+				adjustments: p.adjustments,
+				two_tier: p.two_tier
 			});
 		} catch (err: any) {
 			toast.error(`${$i18n.t('Failed to export')}: ${err?.detail ?? err}`);
@@ -260,9 +295,13 @@
 	};
 
 	const recordProvisional = async () => {
-		const amount = parseFloat(provAmount);
+		const amount = num(provAmount) ?? 0;
 		if (!amount || amount <= 0 || !provBank) {
 			toast.error($i18n.t('Enter the amount and the bank account'));
+			return;
+		}
+		if (!provPeriodEnd) {
+			toast.error($i18n.t('Select the fiscal year the instalment relates to'));
 			return;
 		}
 		recording = true;
@@ -271,7 +310,8 @@
 				amount,
 				bank_account_id: Number(provBank),
 				paid_date: provDate || undefined,
-				reference: provRef || undefined
+				reference: provRef || undefined,
+				period_end: provPeriodEnd
 			});
 			toast.success(
 				$i18n.t('Provisional tax payment recorded') + (r?.entry_number ? ` (${r.entry_number})` : r?.entry_status === 'draft' ? ` (${$i18n.t('draft')})` : '')
@@ -339,6 +379,13 @@
 					class={inputCls}
 				/>
 			</div>
+		{/if}
+		{#if hasTiers}
+			<label class="flex items-center gap-2 text-sm dark:text-gray-200 pb-1.5">
+				<input type="checkbox" bind:checked={twoTier} />
+				{$i18n.t('Two-tiered rates elected')}
+				<span class="text-xs text-gray-400" title={$i18n.t('Only one entity of a group of connected entities may elect the two-tiered rates; the others pay the top rate on the whole profit.')}>ⓘ</span>
+			</label>
 		{/if}
 		<div>
 			<label class={lblCls} for="cit-paid">{$i18n.t('{{tax}} already paid', { tax: citLabel })}</label>
@@ -420,7 +467,7 @@
 			<div class="text-sm font-medium dark:text-gray-200 mb-1">{$i18n.t('Provisional tax payment')}</div>
 			<div class="text-[11px] text-gray-400 dark:text-gray-500 mb-3">
 				{$i18n.t(
-					"The tax office's demand note asks for next year's tax in advance (usually 75% then 25%). Record each instalment here from the note: it is booked as prepaid tax and netted at the year-end. The final balance of a saved return is paid from the filings list below."
+					"The tax office's demand note asks for a year's tax in advance, usually 75% then 25%. Record each instalment from the note with the year it is for: paid before that year's end it is netted in the year-end accrual; paid after (the second instalment) it is set off when the year's return is settled from the filings list below — never paid twice."
 				)}
 			</div>
 			<div class="flex flex-wrap gap-3 items-end">
@@ -431,6 +478,12 @@
 				<div>
 					<label class={lblCls} for="prov-date">{$i18n.t('Paid on')}</label>
 					<input id="prov-date" type="date" bind:value={provDate} class={inputCls} />
+				</div>
+				<div>
+					<label class={lblCls} for="prov-fy">{$i18n.t('Provisional tax for')}</label>
+					<select id="prov-fy" bind:value={provPeriodEnd} class={inputCls}>
+						{#each provYears as y}<option value={y.end}>{$i18n.t('FY')} {y.label} ({$i18n.t('ends')} {y.end})</option>{/each}
+					</select>
 				</div>
 				<div>
 					<label class={lblCls} for="prov-bank">{$i18n.t('Bank account')}</label>
@@ -506,19 +559,19 @@
 					{#if result.cit_provisional}
 						<tr class={rowCls}>
 							<td class="px-4 py-2">
-								{$i18n.t('Less: provisional tax already paid')}
+								{$i18n.t('Less: provisional tax paid by the year-end')}
 								<span class="text-xs text-gray-400">
-									({result.provisional_paid_source === 'ledger' ? $i18n.t('from the ledger') : result.provisional_paid_source === 'manual' ? $i18n.t('typed') : $i18n.t('no prepaid-tax account mapped')})
+									({result.provisional_paid_source === 'payments' ? $i18n.t('from the payments recorded') : result.provisional_paid_source === 'manual' ? $i18n.t('typed') : $i18n.t('no prepaid-tax account mapped')})
 								</span>
 							</td>
 							<td class="px-4 py-2 text-right font-mono">{fmt(result.provisional_paid)}</td>
 						</tr>
 					{/if}
-					{#if result.cit_already_paid || citAlreadyPaid.trim() !== ''}
+					{#if result.cit_already_paid || !blank(citAlreadyPaid)}
 						<tr class={rowCls}>
 							<td class="px-4 py-2">
 								{$i18n.t('Less: {{tax}} already paid', { tax: citLabel })}
-								{#if citAlreadyPaid.trim() === ''}
+								{#if blank(citAlreadyPaid)}
 									<span class="text-xs text-gray-400">({$i18n.t('paid filings in the period')}: {fmt(result.cit_paid_from_filings)})</span>
 								{/if}
 							</td>
@@ -526,9 +579,21 @@
 						</tr>
 					{/if}
 					<tr class="font-bold bg-blue-50/50 dark:bg-blue-900/20">
-						<td class="px-4 py-2">{result.cit_due < 0 ? $i18n.t('Refund / carried forward') : $i18n.t('Balance to be paid')}</td>
+						<td class="px-4 py-2">{result.cit_due < 0 ? $i18n.t('Refund / carried forward') : $i18n.t('Balance at the year-end (the filing amount)')}</td>
 						<td class="px-4 py-2 text-right font-mono">{fmt(Math.abs(result.cit_due))} {result.currency ?? ''}</td>
 					</tr>
+					{#if result.provisional_paid_after_year_end}
+						<tr class={rowCls}>
+							<td class="px-4 py-2 text-gray-500 dark:text-gray-400">
+								{$i18n.t('Provisional tax for this year paid after the year-end — set off when the return is settled')}
+							</td>
+							<td class="px-4 py-2 text-right font-mono text-gray-500 dark:text-gray-400">{fmt(result.provisional_paid_after_year_end)}</td>
+						</tr>
+						<tr class="font-medium">
+							<td class="px-4 py-2">{$i18n.t('Left to pay from the bank at settlement')}</td>
+							<td class="px-4 py-2 text-right font-mono">{fmt(Math.max(result.cit_due_after_set_off, 0))} {result.currency ?? ''}</td>
+						</tr>
+					{/if}
 				</tbody>
 			</table>
 		</div>

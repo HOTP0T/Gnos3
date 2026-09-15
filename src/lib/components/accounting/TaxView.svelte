@@ -17,7 +17,8 @@
 	// The country decides which taxes exist: Hong Kong has no VAT and no salary
 	// withholding, so those tabs are not shown at all, and the income-tax tab
 	// takes the country's own name (IS / 企业所得税 / Profits Tax).
-	let cfg: any = null;
+	// undefined = still loading (nothing rendered), null = could not load (all tabs shown).
+	let cfg: any = undefined;
 	$: hasVat = cfg ? cfg.has_vat !== false : true;
 	$: withholdsIit = cfg ? cfg.withholds_iit !== false : true;
 	$: citLabel = cfg?.cit_label || 'IS';
@@ -59,6 +60,9 @@
 </script>
 
 <div class="py-3 space-y-4">
+	{#if cfg === undefined}
+		<div class="text-xs text-gray-400 py-4">{$i18n.t('Loading...')}</div>
+	{:else}
 	<!-- Sub-tab bar -->
 	<div class="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
 		{#each tabs as tab}
@@ -102,4 +106,5 @@
 			<TaxAccountsSettings {companyId} on:saved={onSaved} />
 		{/if}
 	{/key}
+	{/if}
 </div>
