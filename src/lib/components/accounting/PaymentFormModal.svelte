@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { getContext, createEventDispatcher, onMount, onDestroy, tick } from 'svelte';
+	import { get } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 	import { fade } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
@@ -9,6 +10,16 @@
 	import InvoiceSelector from '$lib/components/accounting/InvoiceSelector.svelte';
 
 	const i18n = getContext('i18n');
+	// The company's own currency (set by the company layout) — the form's default.
+	const companyCurrencyCtx = getContext<any>('companyCurrency');
+	const companyCurrency = (): string => {
+		try {
+			const v = companyCurrencyCtx && typeof companyCurrencyCtx.subscribe === 'function' ? get(companyCurrencyCtx) : companyCurrencyCtx;
+			return (v as string) || 'USD';
+		} catch {
+			return 'USD';
+		}
+	};
 	const dispatch = createEventDispatcher();
 
 	export let show = false;
@@ -136,7 +147,7 @@
 		const today = new Date();
 		payment_date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 		amount = null;
-		currency = 'USD';
+		currency = companyCurrency();
 		direction = 'outbound';
 		method = 'bank_transfer';
 		payer = '';
@@ -150,22 +161,30 @@
 		invoiceLabel = '';
 	};
 
-	$: if (show) {
+	// Reset the form ONCE when the modal opens (or a new prefill arrives). Kept
+	// out of a reactive block: a `$:` that read `payment_date` re-ran on every
+	// keystroke and reset the date, amount and currency the user had just typed.
+	const openForm = (pre: any) => {
 		resetForm();
-		if (prefill) {
-			payment_date = prefill.payment_date || payment_date;
-			amount = prefill.amount || null;
-			currency = prefill.currency || 'USD';
-			direction = prefill.direction || 'outbound';
-			method = prefill.method || 'bank_transfer';
-			payer = prefill.payer || '';
-			payee = prefill.payee || '';
-			reference = prefill.reference || '';
-			if (prefill.invoice_id) {
-				invoice_id = prefill.invoice_id;
-				invoiceLabel = prefill.reference || `#${prefill.invoice_id}`;
+		if (pre) {
+			if (pre.payment_date) payment_date = pre.payment_date;
+			amount = pre.amount || null;
+			currency = pre.currency || companyCurrency();
+			direction = pre.direction || 'outbound';
+			method = pre.method || 'bank_transfer';
+			payer = pre.payer || '';
+			payee = pre.payee || '';
+			reference = pre.reference || '';
+			if (pre.invoice_id) {
+				invoice_id = pre.invoice_id;
+				invoiceLabel = pre.reference || `#${pre.invoice_id}`;
 			}
 		}
+	};
+	let wasShown = false;
+	$: {
+		if (show && !wasShown) openForm(prefill);
+		wasShown = show;
 	}
 
 	const handleKeyDown = (event: KeyboardEvent) => {
