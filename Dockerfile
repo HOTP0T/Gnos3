@@ -36,6 +36,19 @@ WORKDIR /app
 RUN apk add --no-cache git
 
 COPY package.json package-lock.json ./
+
+# npm's defaults assume a fast link. On a long-haul / throttled connection a
+# single package's metadata can take 10-15s, and `npm ci` aborts the whole
+# install with EIDLETIMEOUT part-way through — which fails the image build
+# after several minutes of work. Raise the ceiling and retry harder rather
+# than giving up. NPM_REGISTRY lets a mirror be swapped in without editing
+# this file:  docker build --build-arg NPM_REGISTRY=https://registry.npmmirror.com/
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+ENV npm_config_registry=$NPM_REGISTRY \
+    npm_config_fetch_timeout=900000 \
+    npm_config_fetch_retries=5 \
+    npm_config_fetch_retry_mintimeout=20000 \
+    npm_config_fetch_retry_maxtimeout=180000
 RUN npm ci --legacy-peer-deps
 
 COPY . .
