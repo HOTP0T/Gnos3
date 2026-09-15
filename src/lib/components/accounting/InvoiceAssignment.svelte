@@ -250,8 +250,10 @@
 		await refreshPlan();
 	};
 
-	const candidatesFor = (line: any) => {
-		const q = (lineSearch[line.role] ?? '').toLowerCase();
+	// The search text and account list are passed in so the {#each} re-renders
+	// as the user types (Svelte tracks the template expression, not the function body).
+	const candidatesFor = (line: any, q: string, leafAccounts: any[]) => {
+		q = (q ?? '').toLowerCase();
 		const typeOk = (a: any) =>
 			line.role === 'tax' ? ['liability', 'asset'].includes(a.account_type) : line.role === 'counterparty' ? ['liability', 'asset'].includes(a.account_type) : true;
 		const cands = (line.candidates ?? []).map((c: any) => c.id);
@@ -1227,7 +1229,7 @@
 													on:input={(e) => { lineSearch = { ...lineSearch, [line.role]: e.currentTarget.value }; }}
 												/>
 												<div class="max-h-28 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-													{#each candidatesFor(line) as a}
+													{#each candidatesFor(line, lineSearch[line.role] ?? '', leafAccounts) as a}
 														<button class="w-full text-left px-2 py-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-b border-gray-100 dark:border-gray-800 last:border-b-0" on:click={() => chooseLineAccount(line.role, a.id)}>
 															<span class="font-mono font-medium">{a.code}</span> <span class="text-gray-500">{a.name}</span>
 															{#if (line.candidates ?? []).some((c: any) => c.id === a.id)}<span class="ml-1 text-[9px] text-amber-600">{$i18n.t('suggested')}</span>{/if}

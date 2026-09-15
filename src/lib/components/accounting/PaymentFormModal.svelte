@@ -97,8 +97,11 @@
 		editingSide = null;
 		sideSearch = '';
 	};
-	const sideCandidates = (line: any) => {
-		const q = sideSearch.toLowerCase();
+	// `q` and the account list are passed in so the {#each} in the template
+	// re-renders when the search text changes (Svelte only tracks what the
+	// template expression reads, not what the function reads).
+	const sideCandidates = (line: any, q: string, leafAccounts: any[]) => {
+		q = (q || '').toLowerCase();
 		const cands = (line.candidates ?? []).map((c: any) => c.id);
 		const typeOk = (a: any) => (line.role === 'bank' ? a.account_type === 'asset' : ['liability', 'asset'].includes(a.account_type));
 		return leafAccounts
@@ -549,7 +552,7 @@
 														on:input={(e) => { sideSearch = e.currentTarget.value; }}
 													/>
 													<div class="max-h-28 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-														{#each sideCandidates(line) as a}
+														{#each sideCandidates(line, sideSearch, leafAccounts) as a}
 															<button type="button" class="w-full text-left px-2 py-1 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-b border-gray-100 dark:border-gray-800 last:border-b-0" on:click={() => chooseSide(line.role, a.id)}>
 																<span class="font-mono font-medium">{a.code}</span> <span class="text-gray-500">{a.name}</span>
 																{#if (line.candidates ?? []).some((c: any) => c.id === a.id)}<span class="ml-1 text-[9px] text-amber-600">{$i18n.t('suggested')}</span>{/if}
