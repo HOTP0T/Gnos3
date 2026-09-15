@@ -21,6 +21,12 @@ export default defineConfig({
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
 	},
 	server: {
+		watch: {
+			// The Python venv and the backend's runtime data (vector DB, uploads,
+			// SQLite) live inside this tree. Watching them exhausts inotify
+			// (ENOSPC crash right after "ready") and contributes nothing to HMR.
+			ignored: ['**/venv/**', '**/.venv/**', '**/backend/data/**']
+		},
 		proxy: {
 			'/static': 'http://localhost:8080',
 			'/api': 'http://localhost:8080',

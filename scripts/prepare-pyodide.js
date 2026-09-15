@@ -139,43 +139,73 @@ async function downloadPyPIWheels() {
 		return;
 	}
 
+	const existingWheels = (await readdir('static/pyodide')).filter((f) => f.endsWith('.whl'));
+
 	for (const pkg of pypiPackages) {
+		const normalizedName = pkg.replace(/-/g, '_');
+		let wheel;
+		let version;
+
 		console.log(`Fetching PyPI metadata for: ${pkg}`);
-		const res = await fetch(`https://pypi.org/pypi/${pkg}/json`);
-		if (!res.ok) {
-			console.error(`Failed to fetch PyPI metadata for ${pkg}: ${res.status}`);
-			continue;
-		}
-		const meta = await res.json();
-		const version = meta.info.version;
-		const files = meta.urls || [];
-		// Find the pure-Python wheel (py3-none-any)
-		const wheel = files.find(
-			(f) => f.filename.endsWith('.whl') && f.filename.includes('py3-none-any')
-		);
-		if (!wheel) {
-			console.warn(`No pure-Python wheel found for ${pkg}==${version}, skipping`);
-			continue;
-		}
-		const dest = `static/pyodide/${wheel.filename}`;
-		// Download wheel if not already present
 		try {
-			await access(dest);
-			console.log(`  Already exists: ${wheel.filename}`);
-		} catch {
-			console.log(`  Downloading: ${wheel.filename}`);
-			const wheelRes = await fetch(wheel.url);
-			if (!wheelRes.ok) {
-				console.error(`  Failed to download ${wheel.filename}: ${wheelRes.status}`);
+			const res = await fetch(`https://pypi.org/pypi/${pkg}/json`);
+			if (!res.ok) {
+				console.error(`Failed to fetch PyPI metadata for ${pkg}: ${res.status}`);
+			} else {
+				const meta = await res.json();
+				version = meta.info.version;
+				// Find the pure-Python wheel (py3-none-any)
+				wheel = (meta.urls || []).find(
+					(f) => f.filename.endsWith('.whl') && f.filename.includes('py3-none-any')
+				);
+				if (!wheel) {
+					console.warn(`No pure-Python wheel found for ${pkg}==${version}`);
+				}
+			}
+		} catch (err) {
+			// PyPI unreachable (offline, firewall, flaky network). Never fatal:
+			// fall back to whatever wheel is already in static/pyodide below.
+			console.warn(`  Could not reach PyPI for ${pkg}: ${describeError(err)}`);
+		}
+
+		if (wheel) {
+			const dest = `static/pyodide/${wheel.filename}`;
+			// Download wheel if not already present
+			try {
+				await access(dest);
+				console.log(`  Already exists: ${wheel.filename}`);
+			} catch {
+				console.log(`  Downloading: ${wheel.filename}`);
+				try {
+					const wheelRes = await fetch(wheel.url);
+					if (!wheelRes.ok) {
+						console.error(`  Failed to download ${wheel.filename}: ${wheelRes.status}`);
+						wheel = undefined;
+					} else {
+						const buffer = Buffer.from(await wheelRes.arrayBuffer());
+						await writeFile(dest, buffer);
+						console.log(`  Saved: ${dest} (${buffer.length} bytes)`);
+					}
+				} catch (err) {
+					console.warn(`  Could not download ${wheel.filename}: ${describeError(err)}`);
+					wheel = undefined;
+				}
+			}
+		}
+
+		if (!wheel) {
+			// Offline fallback: reuse a wheel from a previous successful run.
+			const local = existingWheels.find((f) => f.startsWith(`${normalizedName}-`));
+			if (!local) {
+				console.warn(`  No local wheel for ${pkg} either, skipping`);
 				continue;
 			}
-			const buffer = Buffer.from(await wheelRes.arrayBuffer());
-			await writeFile(dest, buffer);
-			console.log(`  Saved: ${dest} (${buffer.length} bytes)`);
+			version = local.split('-')[1];
+			wheel = { filename: local, digests: {} };
+			console.log(`  Using local wheel: ${local}`);
 		}
 
 		// Inject into pyodide-lock.json so micropip resolves locally
-		const normalizedName = pkg.replace(/-/g, '_');
 		if (!lockData.packages[normalizedName]) {
 			lockData.packages[normalizedName] = {
 				name: normalizedName,
@@ -195,7 +225,20 @@ async function downloadPyPIWheels() {
 	console.log('Updated pyodide-lock.json with PyPI packages');
 }
 
+function describeError(err) {
+	return err?.cause?.code || err?.cause?.message || err?.message || String(err);
+}
+
 initNetworkProxyFromEnv();
-await downloadPackages();
-await copyPyodide();
-await downloadPyPIWheels();
+try {
+	await downloadPackages();
+	await copyPyodide();
+	await downloadPyPIWheels();
+} catch (err) {
+	// This script only refreshes the assets in static/pyodide. A network or
+	// filesystem hiccup here must never block `npm run dev` / `npm run build`:
+	// the previously fetched assets keep working.
+	console.error(
+		`prepare-pyodide: non-fatal failure, keeping existing static/pyodide (${describeError(err)})`
+	);
+}
