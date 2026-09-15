@@ -18,7 +18,7 @@
 		aiValidateTransaction
 	} from '$lib/apis/accounting';
 	import { getInvoice } from '$lib/apis/invoices';
-	import { convertAmount } from '$lib/utils/currency';
+	import { convertRowAmount } from '$lib/utils/currency';
 	import { user, isAdmin } from '$lib/stores';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
@@ -191,20 +191,11 @@
 		if (currency) nativeCurrency = currency;
 	};
 
-	function cvt(amount: any, date?: string): { display: string; original: string; hasRate: boolean } {
-		const num = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
-		if (!num || !$displayCurrency || $displayCurrency === nativeCurrency) {
-			return { display: '', original: '', hasRate: true };
-		}
-		const result = convertAmount(num, nativeCurrency, $displayCurrency, ($exchangeRates ?? []), date);
-		return {
-			display: result.hasRate ? result.converted.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '',
-			original: num.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}),
-			hasRate: result.hasRate,
-		};
-	}
-
-	$: isConverting = $displayCurrency && $displayCurrency !== nativeCurrency;
+	// An entry is shown in the display currency converted FROM ITS OWN currency;
+	// in the company currency it uses the rate the entry was booked at, exactly
+	// as the ledger values it.
+	const cvt = (amount: any, date: string | undefined, txn: any) =>
+		convertRowAmount(amount, txn?.currency, $displayCurrency, nativeCurrency, $exchangeRates ?? [], date, txn?.exchange_rate);
 
 	// ─── Data loading ────────────────────────────────────────────────────────────
 	const loadTransactions = async () => {
@@ -688,17 +679,17 @@
 							<!-- Total -->
 							<td class="px-3 py-2 text-right whitespace-nowrap font-medium">
 								{#key $displayCurrency}
-								{#if isConverting}
-									{@const c = cvt(txn.total, txn.transaction_date)}
+								{@const c = cvt(txn.total, txn.transaction_date, txn)}
+								{#if c.converting}
 									{#if c.hasRate}
-										<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{$displayCurrency}</span></span>
-										<div class="text-[9px] text-gray-400">{c.original} {nativeCurrency}</div>
+										<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{c.to}</span></span>
+										<div class="text-[9px] text-gray-400">{c.original} {c.from}</div>
 									{:else}
-										<span>{c.original} {nativeCurrency}</span>
+										<span>{c.original} {c.from}</span>
 										<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
 									{/if}
 								{:else}
-									{formatCurrency(txn.total)}
+									{c.original} <span class="text-[9px] text-gray-400">{c.from}</span>
 								{/if}
 								{/key}
 							</td>
@@ -932,18 +923,18 @@
 																<td class="py-1 pr-2 text-right dark:text-gray-300">
 																	{#if parseFloat(String(line.debit ?? 0)) > 0}
 																		{#key $displayCurrency}
-																		{#if isConverting}
-																			{@const c = cvt(line.debit, txn.transaction_date)}
-																			{#if c.hasRate}
-																				<span>{c.display} <span class="text-[9px] text-gray-400">{$displayCurrency}</span></span>
-																				<div class="text-[9px] text-gray-400">{c.original} {nativeCurrency}</div>
+																		{@const c = cvt(line.debit, txn.transaction_date, txn)}
+																		{#if c.converting}
+																				{#if c.hasRate}
+																					<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{c.to}</span></span>
+																					<div class="text-[9px] text-gray-400">{c.original} {c.from}</div>
+																				{:else}
+																					<span>{c.original} {c.from}</span>
+																					<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
+																				{/if}
 																			{:else}
-																				<span>{c.original} {nativeCurrency}</span>
-																				<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
+																				{c.original} <span class="text-[9px] text-gray-400">{c.from}</span>
 																			{/if}
-																		{:else}
-																			{formatCurrency(line.debit)}
-																		{/if}
 																		{/key}
 																	{:else}
 																		-
@@ -952,18 +943,18 @@
 																<td class="py-1 pr-2 text-right dark:text-gray-300">
 																	{#if parseFloat(String(line.credit ?? 0)) > 0}
 																		{#key $displayCurrency}
-																		{#if isConverting}
-																			{@const c = cvt(line.credit, txn.transaction_date)}
-																			{#if c.hasRate}
-																				<span>{c.display} <span class="text-[9px] text-gray-400">{$displayCurrency}</span></span>
-																				<div class="text-[9px] text-gray-400">{c.original} {nativeCurrency}</div>
+																		{@const c = cvt(line.credit, txn.transaction_date, txn)}
+																		{#if c.converting}
+																				{#if c.hasRate}
+																					<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{c.to}</span></span>
+																					<div class="text-[9px] text-gray-400">{c.original} {c.from}</div>
+																				{:else}
+																					<span>{c.original} {c.from}</span>
+																					<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
+																				{/if}
 																			{:else}
-																				<span>{c.original} {nativeCurrency}</span>
-																				<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
+																				{c.original} <span class="text-[9px] text-gray-400">{c.from}</span>
 																			{/if}
-																		{:else}
-																			{formatCurrency(line.credit)}
-																		{/if}
 																		{/key}
 																	{:else}
 																		-

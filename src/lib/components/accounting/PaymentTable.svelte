@@ -5,7 +5,7 @@
 	import dayjs from 'dayjs';
 
 	import { getPayments, deletePayment, getAccounts } from '$lib/apis/accounting';
-	import { convertAmount } from '$lib/utils/currency';
+	import { convertRowAmount } from '$lib/utils/currency';
 	import { user, isAdmin } from '$lib/stores';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
@@ -89,20 +89,10 @@
 		if (currency) nativeCurrency = currency;
 	};
 
-	function cvt(amount: any, date?: string): { display: string; original: string; hasRate: boolean } {
-		const num = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
-		if (!num || !$displayCurrency || $displayCurrency === nativeCurrency) {
-			return { display: '', original: '', hasRate: true };
-		}
-		const result = convertAmount(num, nativeCurrency, $displayCurrency, ($exchangeRates ?? []), date);
-		return {
-			display: result.hasRate ? result.converted.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '',
-			original: num.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}),
-			hasRate: result.hasRate,
-		};
-	}
-
-	$: isConverting = $displayCurrency && $displayCurrency !== nativeCurrency;
+	// A payment is shown in the display currency converted FROM ITS OWN currency
+	// (a USD wire stays USD 1,200 when USD is selected; HKD 9,300 when HKD is).
+	const cvt = (amount: any, date?: string, rowCurrency?: string | null) =>
+		convertRowAmount(amount, rowCurrency, $displayCurrency, nativeCurrency, $exchangeRates ?? [], date);
 
 	// ─── Data loading ───────────────────────────────────────────────────────────
 
@@ -394,17 +384,17 @@
 							<!-- Amount -->
 							<td class="px-3 py-1.5 text-right whitespace-nowrap font-medium">
 								{#key $displayCurrency}
-								{#if isConverting}
-									{@const c = cvt(payment.amount, payment.payment_date)}
+								{@const c = cvt(payment.amount, payment.payment_date, payment.currency)}
+								{#if c.converting}
 									{#if c.hasRate}
-										<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{$displayCurrency}</span></span>
-										<div class="text-[9px] text-gray-400">{c.original} {nativeCurrency}</div>
+										<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{c.to}</span></span>
+										<div class="text-[9px] text-gray-400">{c.original} {c.from}</div>
 									{:else}
-										<span>{c.original} {nativeCurrency}</span>
+										<span>{c.original} {c.from}</span>
 										<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
 									{/if}
 								{:else}
-									{formatCurrency(payment.amount)}
+									{c.original} <span class="text-[9px] text-gray-400">{c.from}</span>
 								{/if}
 								{/key}
 							</td>

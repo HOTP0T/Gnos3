@@ -21,7 +21,7 @@
 		getExpenseCategories
 	} from '$lib/apis/accounting';
 	import { updateInvoice } from '$lib/apis/invoices';
-	import { convertAmount } from '$lib/utils/currency';
+	import { convertRowAmount } from '$lib/utils/currency';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import K4miDocLink from '$lib/components/common/K4miDocLink.svelte';
 	import DocumentPreviewModal from '$lib/components/invoices/DocumentPreviewModal.svelte';
@@ -490,20 +490,24 @@
 		if (currency) nativeCurrency = currency;
 	};
 
-	function cvt(amount: any, date?: string): { display: string; original: string; hasRate: boolean } {
-		const num = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
-		if (!num || !$displayCurrency || $displayCurrency === nativeCurrency) {
-			return { display: '', original: '', hasRate: true };
-		}
-		const result = convertAmount(num, nativeCurrency, $displayCurrency, ($exchangeRates ?? []), date);
-		return {
-			display: result.hasRate ? result.converted.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '',
-			original: num.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}),
-			hasRate: result.hasRate,
-		};
-	}
+	// Each invoice is shown in the selected display currency converted FROM ITS
+	// OWN currency (a EUR bill is EUR, whatever the company's books are in).
+	const cvt = (amount: any, date?: string, rowCurrency?: string | null) =>
+		convertRowAmount(amount, rowCurrency, $displayCurrency, nativeCurrency, $exchangeRates ?? [], date);
 
-	$: isConverting = $displayCurrency && $displayCurrency !== nativeCurrency;
+	// The summary card: every invoice converted into the display currency (or the
+	// company currency), so mixed-currency lists add up to something meaningful.
+	$: summaryCurrency = ($displayCurrency || nativeCurrency || '').toUpperCase();
+	$: summary = (() => {
+		let sum = 0;
+		let missing = 0;
+		for (const i of companyInvoices) {
+			const c = cvt(i.total_amount, i.invoice_date, i.currency);
+			if (!c.hasRate) { missing += 1; continue; }
+			sum += parseFloat(String(c.display).replace(/[^0-9.-]/g, '')) || 0;
+		}
+		return { sum, missing };
+	})();
 
 	const fmt = (amount: string | number | null, cur: string = 'USD'): string => {
 		if (!amount) return '-';
@@ -581,17 +585,10 @@
 				<div class="text-xs text-gray-500 dark:text-gray-400">{$i18n.t('Total Amount')}</div>
 				<div class="text-xl font-medium dark:text-gray-200">
 					{#key $displayCurrency}
-					{#if isConverting}
-						{@const c = cvt(totalAmount)}
-						{#if c.hasRate}
-							<span>{c.display} <span class="text-xs text-gray-400">{$displayCurrency}</span></span>
-							<div class="text-[10px] text-gray-400">{c.original} {nativeCurrency}</div>
-						{:else}
-							<span>{c.original} {nativeCurrency}</span>
+						<span>{summary.sum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span class="text-xs text-gray-400">{summaryCurrency}</span></span>
+						{#if summary.missing > 0}
+							<div class="text-[10px] text-amber-600">{$i18n.t('{{n}} invoice(s) without an exchange rate not included', { n: summary.missing })}</div>
 						{/if}
-					{:else}
-						{fmt(totalAmount)} <span class="text-sm text-gray-400">{nativeCurrency}</span>
-					{/if}
 					{/key}
 				</div>
 			</div>
@@ -732,17 +729,17 @@
 									<td class="px-2 py-1.5">{inv.invoice_date ?? '-'}</td>
 									<td class="px-2 py-1.5 text-right font-mono">
 										{#key $displayCurrency}
-										{#if isConverting}
-											{@const c = cvt(inv.total_amount, inv.invoice_date)}
+										{@const c = cvt(inv.total_amount, inv.invoice_date, inv.currency)}
+										{#if c.converting}
 											{#if c.hasRate}
-												<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{$displayCurrency}</span></span>
-												<div class="text-[9px] text-gray-400">{c.original} {nativeCurrency}</div>
+												<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{c.to}</span></span>
+												<div class="text-[9px] text-gray-400">{c.original} {c.from}</div>
 											{:else}
-												<span>{c.original} {nativeCurrency}</span>
+												<span>{c.original} {c.from}</span>
 												<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
 											{/if}
 										{:else}
-											{fmt(inv.total_amount)} <span class="text-[10px] text-gray-400 ml-0.5">{inv.currency || nativeCurrency}</span>
+											{c.original} <span class="text-[9px] text-gray-400">{c.from}</span>
 										{/if}
 										{/key}
 									</td>
@@ -1062,17 +1059,17 @@
 										<td class="px-2 py-1.5">{inv.invoice_date ?? '-'}</td>
 										<td class="px-2 py-1.5 text-right font-mono">
 											{#key $displayCurrency}
-											{#if isConverting}
-												{@const c = cvt(inv.total_amount, inv.invoice_date)}
+											{@const c = cvt(inv.total_amount, inv.invoice_date, inv.currency)}
+											{#if c.converting}
 												{#if c.hasRate}
-													<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{$displayCurrency}</span></span>
-													<div class="text-[9px] text-gray-400">{c.original} {nativeCurrency}</div>
+													<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{c.to}</span></span>
+													<div class="text-[9px] text-gray-400">{c.original} {c.from}</div>
 												{:else}
-													<span>{c.original} {nativeCurrency}</span>
+													<span>{c.original} {c.from}</span>
 													<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
 												{/if}
 											{:else}
-												{fmt(inv.total_amount)} <span class="text-[10px] text-gray-400 ml-0.5">{inv.currency || nativeCurrency}</span>
+												{c.original} <span class="text-[9px] text-gray-400">{c.from}</span>
 											{/if}
 											{/key}
 										</td>

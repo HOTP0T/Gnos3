@@ -82,6 +82,58 @@ export function convertAmount(
 	};
 }
 
+export interface RowConversion {
+	/** true when the row is shown in a currency other than its own */
+	converting: boolean;
+	/** the row's own currency (what the document / payment / entry is in) */
+	from: string;
+	/** the currency the row is shown in */
+	to: string;
+	/** converted amount, formatted — '' when no rate */
+	display: string;
+	/** the row's own amount, formatted */
+	original: string;
+	hasRate: boolean;
+	/** 'booked' when the entry's own stored rate was used, else the rate's date */
+	rateDate: string;
+}
+
+const fmt2 = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+/**
+ * Show a row's amount in the selected display currency.
+ *
+ * A row (invoice, payment, journal entry) has its OWN currency; the conversion
+ * always starts from that currency — never from the company currency — so a
+ * EUR 1,200 bill in HKD books shows as HKD 10,080 when HKD is selected, and
+ * stays EUR 1,200 when EUR is selected. An entry that already carries the rate
+ * it was booked at (`bookedRate`, row currency → company currency) is shown in
+ * the company currency at exactly that rate, the way the ledger values it.
+ */
+export function convertRowAmount(
+	amount: number | string | null | undefined,
+	rowCurrency: string | null | undefined,
+	displayCurrency: string | null | undefined,
+	companyCurrency: string,
+	rates: ExchangeRate[],
+	asOf?: string | Date,
+	bookedRate?: number | string | null
+): RowConversion {
+	const num = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
+	const from = (rowCurrency || companyCurrency || '').toUpperCase();
+	const to = (displayCurrency || companyCurrency || '').toUpperCase();
+	const original = fmt2(num || 0);
+	if (!num || !from || !to || from === to) {
+		return { converting: false, from, to, display: original, original, hasRate: true, rateDate: '' };
+	}
+	const booked = bookedRate != null ? Number(bookedRate) : NaN;
+	if (to === (companyCurrency || '').toUpperCase() && booked > 0 && booked !== 1) {
+		return { converting: true, from, to, display: fmt2(Math.round(num * booked * 100) / 100), original, hasRate: true, rateDate: 'booked' };
+	}
+	const r = convertAmount(num, from, to, rates ?? [], asOf);
+	return { converting: true, from, to, display: r.hasRate ? fmt2(r.converted) : '', original, hasRate: r.hasRate, rateDate: r.rateDate };
+}
+
 /**
  * Format a monetary amount with currency code.
  */
