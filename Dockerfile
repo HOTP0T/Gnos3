@@ -160,12 +160,22 @@ ENV PIP_DEFAULT_TIMEOUT=300 \
     PIP_RETRIES=10 \
     UV_HTTP_TIMEOUT=300
 
+# Package sources. Defaults are upstream, so nothing changes for a normal
+# build. On a link where the international CDNs stall mid-download, point
+# these at a regional mirror instead of waiting out repeated timeouts, e.g.
+#   --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+#   --build-arg TORCH_INDEX_URL=https://mirrors.aliyun.com/pytorch-wheels
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl
+ENV PIP_INDEX_URL=$PIP_INDEX_URL \
+    UV_DEFAULT_INDEX=$PIP_INDEX_URL
+
 RUN set -e; \
     pip3 install --no-cache-dir uv; \
     if [ "$USE_CUDA" = "true" ]; then \
     # If you use CUDA the whisper and embedding model will be downloaded on first use
     # fix: pin torch<=2.9.1 - torch 2.10.0 aarch64 wheels cause SIGILL on ARM devices (RPi 4 Cortex-A72) #21349
-    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url https://download.pytorch.org/whl/$USE_CUDA_DOCKER_VER --no-cache-dir; \
+    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url ${TORCH_INDEX_URL}/$USE_CUDA_DOCKER_VER --no-cache-dir; \
     uv pip install --system -r requirements.txt --no-cache-dir; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
@@ -173,7 +183,7 @@ RUN set -e; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
     python -c "import nltk; nltk.download('punkt_tab')"; \
     else \
-    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --no-cache-dir; \
+    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url ${TORCH_INDEX_URL}/cpu --no-cache-dir; \
     uv pip install --system -r requirements.txt --no-cache-dir; \
     if [ "$USE_SLIM" != "true" ]; then \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
