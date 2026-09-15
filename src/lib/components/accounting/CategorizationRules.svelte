@@ -194,14 +194,27 @@
 				<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">{pendingRules.length} {$i18n.t('pending')}</span>
 			{/if}
 		</div>
-		<button
-			class="px-3 py-1 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
-			on:click={() => { if (showForm) { cancelEdit(); } else { editingRule = null; showForm = true; } }}
-		>{showForm ? $i18n.t('Cancel') : $i18n.t('Add Rule')}</button>
+		<div class="flex gap-1">
+			{#if showForm}
+				<button
+					class="px-3 py-1 text-xs font-medium rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
+					on:click={cancelEdit}
+				>{$i18n.t('Cancel')}</button>
+			{:else}
+				<button
+					class="px-3 py-1 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+					on:click={() => { editingRule = null; newRuleType = 'invoice'; showForm = true; }}
+				>{$i18n.t('Add Invoice Rule')}</button>
+				<button
+					class="px-3 py-1 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition"
+					on:click={() => { editingRule = null; newRuleType = 'bank_fee'; showForm = true; }}
+				>{$i18n.t('Add Bank Line Rule')}</button>
+			{/if}
+		</div>
 	</div>
 
 	<p class="text-xs text-gray-500 dark:text-gray-400">
-		{$i18n.t('Rules map vendor or client names to accounts. The AI learns from your corrections automatically.')}
+		{$i18n.t('Invoice rules map a vendor or client name to the accounts an invoice is booked on. Bank line rules map a pattern in a bank statement description (a fee, a tax payment, a salary run) to the account that line settles. The AI learns invoice rules from your corrections automatically.')}
 	</p>
 
 	{#if showForm}
