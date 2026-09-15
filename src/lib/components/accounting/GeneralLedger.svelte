@@ -56,27 +56,34 @@
 	// from the entry's currency to the display currency (returns the numeric value;
 	// falls back to the original when not converting / no rate). Store args are passed
 	// so the {@const}/reactive call sites recompute when the selection changes.
-	function jconv(amount: any, entryCcy: string, date: string, disp: string, rates: any[]): { v: number; hasRate: boolean } {
-		const n = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
-		const cur = (entryCcy || '').toUpperCase();
-		if (!disp || !cur || disp === cur) return { v: isNaN(n) ? 0 : n, hasRate: true };
-		const r = convertAmount(isNaN(n) ? 0 : n, cur, disp, rates ?? [], date);
-		return { v: r.hasRate ? r.converted : (isNaN(n) ? 0 : n), hasRate: r.hasRate };
-	}
-	// Per-line base→display factor for a journal entry's currency (feeds <ReportAmount>).
-	function jfactor(entryCcy: string, date: string, disp: string, rates: any[]): number | null {
+	// When the display currency is the company currency, an entry is valued at
+	// the rate it was BOOKED at (exactly as the ledger and every report value it);
+	// any other target goes through the rate table.
+	function jrate(entryCcy: string, date: string, disp: string, rates: any[], booked?: any): number | null {
 		const cur = (entryCcy || '').toUpperCase();
 		if (!disp || !cur || disp === cur) return 1;
+		const b = booked != null ? Number(booked) : NaN;
+		if (disp.toUpperCase() === (baseCcy || '').toUpperCase() && b > 0) return b;
 		const r = convertAmount(1, cur, disp, rates ?? [], date);
 		return r.hasRate ? r.rate : null;
 	}
+	function jconv(amount: any, entryCcy: string, date: string, disp: string, rates: any[], booked?: any): { v: number; hasRate: boolean } {
+		const n = typeof amount === 'string' ? parseFloat(amount) : (amount ?? 0);
+		const v = isNaN(n) ? 0 : n;
+		const f = jrate(entryCcy, date, disp, rates, booked);
+		return f === null ? { v, hasRate: false } : { v: Math.round(v * f * 100) / 100, hasRate: true };
+	}
+	// Per-line entry-currency→display factor for a journal entry (feeds <ReportAmount>).
+	function jfactor(entryCcy: string, date: string, disp: string, rates: any[], booked?: any): number | null {
+		return jrate(entryCcy, date, disp, rates, booked);
+	}
 	// Journal totals in the display currency = sum of per-line converted amounts.
 	$: journalDispDebit = journalEntries.reduce(
-		(s, e) => s + e.lines.reduce((ls: number, l: any) => ls + jconv(l.debit, e.currency, e.transaction_date, $displayCurrency, $exchangeRates ?? []).v, 0),
+		(s, e) => s + e.lines.reduce((ls: number, l: any) => ls + jconv(l.debit, e.currency, e.transaction_date, $displayCurrency, $exchangeRates ?? [], e.exchange_rate).v, 0),
 		0
 	);
 	$: journalDispCredit = journalEntries.reduce(
-		(s, e) => s + e.lines.reduce((ls: number, l: any) => ls + jconv(l.credit, e.currency, e.transaction_date, $displayCurrency, $exchangeRates ?? []).v, 0),
+		(s, e) => s + e.lines.reduce((ls: number, l: any) => ls + jconv(l.credit, e.currency, e.transaction_date, $displayCurrency, $exchangeRates ?? [], e.exchange_rate).v, 0),
 		0
 	);
 	$: journalConverting = !!$displayCurrency && journalEntries.some((e) => (e.currency || '').toUpperCase() !== $displayCurrency.toUpperCase());
@@ -219,8 +226,8 @@
 									<td class="px-2 py-1.5">{lineIdx === 0 ? entry.currency : ''}</td>
 									<td class="px-2 py-1.5 text-right font-mono">{lineIdx === 0 ? fmtRate(entry.exchange_rate) : ''}</td>
 									<td class="px-2 py-1.5 text-right font-mono">{origAmount(line)}</td>
-									<td class="px-2 py-1.5 text-right font-mono">{#key $displayCurrency}<ReportAmount value={line.debit} factor={jfactor(entry.currency, entry.transaction_date, $displayCurrency, $exchangeRates ?? [])} converting={!!$displayCurrency && (entry.currency || '').toUpperCase() !== $displayCurrency.toUpperCase()} displayCcy={$displayCurrency} baseCcy={entry.currency} />{/key}</td>
-									<td class="px-2 py-1.5 text-right font-mono">{#key $displayCurrency}<ReportAmount value={line.credit} factor={jfactor(entry.currency, entry.transaction_date, $displayCurrency, $exchangeRates ?? [])} converting={!!$displayCurrency && (entry.currency || '').toUpperCase() !== $displayCurrency.toUpperCase()} displayCcy={$displayCurrency} baseCcy={entry.currency} />{/key}</td>
+									<td class="px-2 py-1.5 text-right font-mono">{#key $displayCurrency}<ReportAmount value={line.debit} factor={jfactor(entry.currency, entry.transaction_date, $displayCurrency, $exchangeRates ?? [], entry.exchange_rate)} converting={!!$displayCurrency && (entry.currency || '').toUpperCase() !== $displayCurrency.toUpperCase()} displayCcy={$displayCurrency} baseCcy={entry.currency} />{/key}</td>
+									<td class="px-2 py-1.5 text-right font-mono">{#key $displayCurrency}<ReportAmount value={line.credit} factor={jfactor(entry.currency, entry.transaction_date, $displayCurrency, $exchangeRates ?? [], entry.exchange_rate)} converting={!!$displayCurrency && (entry.currency || '').toUpperCase() !== $displayCurrency.toUpperCase()} displayCcy={$displayCurrency} baseCcy={entry.currency} />{/key}</td>
 								</tr>
 							{/each}
 						{/each}

@@ -1,4 +1,4 @@
-import { convertAmount } from '$lib/utils/currency';
+import { convertAmount, convertRowAmount } from '$lib/utils/currency';
 
 export function fmtNumber(v: number | string, opts?: Intl.NumberFormatOptions): string {
 	const num = typeof v === 'string' ? parseFloat(v) : v ?? 0;
@@ -24,8 +24,10 @@ export interface MoneyView {
 	original: string; // native, no currency suffix
 }
 
-// Mirror of AccountingDashboard's cvt(): converts to the display currency when
-// one is selected and differs from the company's native currency.
+// Mirror of AccountingDashboard's cvt(): converts a BASE-currency amount (a KPI,
+// a report figure) to the display currency when one is selected and differs
+// from the company's native currency. For a row that has its own currency (an
+// entry, a payment) use `rowMoney` — never this.
 export function money(
 	amount: number | string | null | undefined,
 	nativeCurrency: string,
@@ -45,4 +47,20 @@ export function money(
 		display: r.hasRate ? fmtNumber(r.converted) : '',
 		original: fmtNumber(num)
 	};
+}
+
+// A row in its own currency (an entry's total, a payment) shown in the display
+// currency: the conversion starts from the row's currency, and an entry shown
+// in the company currency is valued at the rate it was booked at.
+export function rowMoney(
+	amount: number | string | null | undefined,
+	rowCurrency: string | null | undefined,
+	nativeCurrency: string,
+	displayCurrency: string,
+	rates: any[],
+	date?: string,
+	bookedRate?: number | string | null
+): MoneyView & { from: string; to: string } {
+	const r = convertRowAmount(amount, rowCurrency, displayCurrency, nativeCurrency, rates ?? [], date, bookedRate);
+	return { converting: r.converting, hasRate: r.hasRate, display: r.display, original: r.original, from: r.from, to: r.to };
 }

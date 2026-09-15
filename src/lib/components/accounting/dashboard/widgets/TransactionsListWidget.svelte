@@ -6,7 +6,7 @@
 	import dayjs from 'dayjs';
 	import { getTransactions } from '$lib/apis/accounting';
 	import Badge from '$lib/components/common/Badge.svelte';
-	import { money } from '../format';
+	import { rowMoney } from '../format';
 
 	export let companyId: number;
 	export let options: { status?: 'all' | 'draft'; limit?: number } = {};
@@ -69,7 +69,7 @@
 			</thead>
 			<tbody>
 				{#each rows as tx}
-					{@const mv = money(tx.total ?? tx.amount ?? 0, nativeCurrency, $displayCurrency, $exchangeRates ?? [], tx.transaction_date)}
+					{@const mv = rowMoney(tx.total ?? tx.amount ?? 0, tx.currency, nativeCurrency, $displayCurrency, $exchangeRates ?? [], tx.transaction_date, tx.exchange_rate)}
 					<tr
 						class="cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-850/50 transition border-b border-gray-50 dark:border-gray-850/20"
 						on:click={() => goto(`/accounting/company/${companyId}/entries?id=${tx.id}`)}
@@ -81,9 +81,9 @@
 						<td class="px-1.5 py-1 max-w-[160px] truncate">{tx.description ?? tx.memo ?? '-'}</td>
 						<td class="px-1.5 py-1 text-right tabular-nums">
 							{#if mv.converting && mv.hasRate}
-								{mv.display} <span class="text-[9px] text-gray-400">{$displayCurrency}</span>
+								{mv.display} <span class="text-[9px] text-gray-400">{mv.to}</span>
 							{:else}
-								{mv.original} <span class="text-[9px] text-gray-400">{nativeCurrency}</span>
+								{mv.original} <span class="text-[9px] text-gray-400">{mv.from}</span>
 							{/if}
 						</td>
 						<td class="px-1.5 py-1"><Badge type={statusType(tx.status)} content={tx.status ?? 'draft'} /></td>

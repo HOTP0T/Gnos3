@@ -14,7 +14,7 @@
 		getAccountingAiStatus
 	} from '$lib/apis/accounting';
 	import { theme } from '$lib/stores';
-	import { convertAmount } from '$lib/utils/currency';
+	import { convertAmount, convertRowAmount } from '$lib/utils/currency';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Badge from '$lib/components/common/Badge.svelte';
@@ -615,17 +615,17 @@
 								</td>
 								<td class="px-3 py-1.5 text-right">
 									{#key $displayCurrency}
-									{#if isConverting}
-										{@const c = cvt(transaction.total ?? transaction.amount ?? 0, transaction.transaction_date)}
+									{@const c = convertRowAmount(transaction.total ?? transaction.amount ?? 0, transaction.currency, $displayCurrency, nativeCurrency, $exchangeRates ?? [], transaction.transaction_date, transaction.exchange_rate)}
+									{#if c.converting}
 										{#if c.hasRate}
-											<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{$displayCurrency}</span></span>
-											<div class="text-[9px] text-gray-400">{c.original} {nativeCurrency}</div>
+											<span class="font-medium">{c.display} <span class="text-[9px] text-gray-400">{c.to}</span></span>
+											<div class="text-[9px] text-gray-400">{c.original} {c.from}</div>
 										{:else}
-											<span>{c.original} {nativeCurrency}</span>
+											<span>{c.original} {c.from}</span>
 											<span class="text-[9px] text-amber-500 italic" title="No exchange rate available">&#9888;</span>
 										{/if}
 									{:else}
-										{formatCurrency(transaction.total ?? transaction.amount ?? 0)}
+										{c.original} <span class="text-[9px] text-gray-400">{c.from}</span>
 									{/if}
 									{/key}
 								</td>
