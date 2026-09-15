@@ -48,6 +48,8 @@
 	// Company base currency + live-rate hint for the exchange-rate field.
 	let baseCurrency = '';
 	let rateHint = '';
+	// Set when the booking engine left an exchange_rate gap on this draft.
+	let rateGapNote = '';
 	let rateMissing = false;
 	let lastShow = false;
 
@@ -344,7 +346,13 @@
 				})) ?? [];
 			// Lines the booking engine could not resolve: shown as lines awaiting an
 			// account. Saving with every account chosen clears the gaps server-side.
+			rateGapNote = '';
 			for (const g of transaction.booking_gaps ?? []) {
+				if (g.role === 'exchange_rate') {
+					// Not a line: the entry needs a rate, not an account.
+					rateGapNote = g.note ?? '';
+					continue;
+				}
 				const amt = parseFloat(String(g.amount ?? 0)) || null;
 				lines = [
 					...lines,
@@ -777,6 +785,9 @@
 						placeholder="1.0"
 						disabled={readOnly}
 					/>
+					{#if rateGapNote}
+						<div class="text-[11px] mt-1 text-red-700 dark:text-red-300">{rateGapNote}</div>
+					{/if}
 					{#if rateHint}
 						<div
 							class="text-[10px] mt-1 {rateMissing

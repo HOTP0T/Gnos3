@@ -61,7 +61,9 @@
 				payer: payer || undefined,
 				reference: reference || undefined,
 				debit_account_id: debit_account_id ?? undefined,
-				credit_account_id: credit_account_id ?? undefined
+				credit_account_id: credit_account_id ?? undefined,
+				currency: currency || undefined,
+				payment_date: payment_date || undefined
 			});
 		} catch {
 			plan = null;
@@ -74,7 +76,7 @@
 	};
 	$: if (show && mounted) {
 		// re-resolve whenever an input that can change the accounts changes
-		void [direction, invoice_id, payee, payer, reference, debit_account_id, credit_account_id, amount];
+		void [direction, invoice_id, payee, payer, reference, debit_account_id, credit_account_id, amount, currency, payment_date];
 		schedulePlan();
 	}
 	const chooseSide = (role: string, id: number) => {
@@ -96,6 +98,8 @@
 	const SOURCE_LABEL: Record<string, string> = {
 		human: 'chosen', invoice: "from the invoice's entry", matched: 'from the matched entry', bank_default: 'bank account default', rule: 'from rule', company: 'company default', missing: 'account required'
 	};
+	$: fxRate = plan?.exchange_rate ?? null;
+	$: fxForeign = !!fxRate && fxRate.currency !== fxRate.base;
 	$: planReady = !!plan && plan.complete;
 	let showInvoiceSelector = false;
 	let invoiceLabel = '';
@@ -550,6 +554,21 @@
 									{/each}
 								</tbody>
 							</table>
+							{#if fxForeign}
+								<div class="px-3 py-1.5 border-t border-gray-100 dark:border-gray-800 text-[10px] {fxRate.rate ? 'text-gray-500 dark:text-gray-400' : 'text-red-700 dark:text-red-300'}">
+									{fxRate.currency} → {fxRate.base}:
+									{fxRate.rate
+										? `${fxRate.rate} (${$i18n.t('rate on file')}, ${fxRate.date})`
+										: $i18n.t('no rate on file for {{date}} — the entry stays a draft until one is added in Exchange Rates', { date: fxRate.date })}
+								</div>
+							{/if}
+							{#if plan.fx}
+								<div class="px-3 py-1.5 border-t border-gray-100 dark:border-gray-800 text-[10px] {plan.fx.account_id ? 'text-gray-600 dark:text-gray-300' : 'text-amber-700 dark:text-amber-300'}">
+									{$i18n.t(plan.fx.label)}: {plan.fx.amount_base?.toFixed ? plan.fx.amount_base.toFixed(2) : plan.fx.amount_base} {fxRate?.base ?? ''}
+									({$i18n.t('booked at')} {plan.fx.settled_rate}, {$i18n.t('paid at')} {fxRate?.rate})
+									→ {plan.fx.account_id ? `${plan.fx.account_code} ${plan.fx.account_name}` : $i18n.t('exchange gain / loss account not set — booked as a draft with a gap')}
+								</div>
+							{/if}
 						{:else}
 							<div class="px-3 py-2 text-[11px] text-gray-400">{$i18n.t('Fill in the payment to see the entry.')}</div>
 						{/if}

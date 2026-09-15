@@ -29,11 +29,18 @@
 	let assessedAmount: string | number | null = '';
 	let processing = false;
 	// What the settlement will book (debit and credit legs) + roles still unmapped.
-	let preview: { legs: any[]; missing: string[]; total: number; bank?: number; warnings?: string[]; over_under?: number; tax_accrued?: number } | null = null;
+	let preview: { legs: any[]; missing: string[]; total: number; bank?: number; warnings?: string[]; over_under?: number; tax_accrued?: number; bank_fx?: any } | null = null;
 	let previewLoading = false;
 	const blank = (v: any) => v === '' || v === null || v === undefined;
 	const assessed = () => (blank(assessedAmount) ? undefined : parseFloat(String(assessedAmount)) || 0);
 	$: isCit = taxType === 'cit';
+	// Foreign-currency bank account: what left the bank in its currency, and the
+	// rate (prefilled from the rate table; typed when the bank's rate differs).
+	let bankFcAmount: string | number | null = '';
+	let bankRate: string | number | null = '';
+	const numOr = (v: any) => (blank(v) ? undefined : parseFloat(String(v)) || undefined);
+	$: bankFx = preview?.bank_fx ?? null;
+	$: foreignBank = !!bankFx?.foreign;
 
 	const fmt = (v: any): string => {
 		const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0);
@@ -71,7 +78,12 @@
 	const loadPreview = async (f: any) => {
 		previewLoading = true;
 		try {
-			preview = await getTaxPaymentPreview(f.id, payableAccountId === '' ? undefined : Number(payableAccountId), isCit ? assessed() : undefined);
+			preview = await getTaxPaymentPreview(f.id, payableAccountId === '' ? undefined : Number(payableAccountId), isCit ? assessed() : undefined, {
+				bank_account_id: bankAccountId === '' ? undefined : Number(bankAccountId),
+				bank_fc_amount: numOr(bankFcAmount),
+				rate: numOr(bankRate),
+				paid_date: paidDate || undefined
+			});
 		} catch (err: any) {
 			preview = null;
 			toast.error(`${$i18n.t('Failed to preview payment')}: ${err?.detail ?? err}`);
@@ -84,6 +96,8 @@
 		bankAccountId = '';
 		payableAccountId = '';
 		assessedAmount = '';
+		bankFcAmount = '';
+		bankRate = '';
 		paidDate = today();
 		preview = null;
 		await loadPreview(f);
@@ -100,7 +114,9 @@
 				bank_account_id: Number(bankAccountId),
 				paid_date: paidDate || today(),
 				payable_account_id: payableAccountId === '' ? undefined : Number(payableAccountId),
-				assessed_amount: isCit ? assessed() : undefined
+				assessed_amount: isCit ? assessed() : undefined,
+				bank_fc_amount: foreignBank ? numOr(bankFcAmount) : undefined,
+				rate: foreignBank ? numOr(bankRate) : undefined
 			});
 			toast.success((preview?.bank ?? preview?.total ?? 0) > 0 ? $i18n.t('Filing marked paid') : $i18n.t('Filing settled against provisional tax — no bank movement'));
 			payingId = null;
@@ -215,6 +231,7 @@
 											<select
 												id="pay-bank-{f.id}"
 												bind:value={bankAccountId}
+												on:change={() => { bankFcAmount = ''; bankRate = ''; loadPreview(f); }}
 												class="text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden"
 											>
 												<option value="">{$i18n.t('Select account...')}</option>
@@ -231,12 +248,43 @@
 												id="pay-date-{f.id}"
 												type="date"
 												bind:value={paidDate}
+												on:change={() => loadPreview(f)}
 												class="text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden"
 											/>
 										</div>
+										{#if foreignBank}
+											<div>
+												<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1" for="pay-fc-{f.id}">
+													{$i18n.t('Amount debited')} ({bankFx.bank_currency})
+												</label>
+												<input
+													id="pay-fc-{f.id}"
+													type="number"
+													step="0.01"
+													bind:value={bankFcAmount}
+													on:change={() => loadPreview(f)}
+													placeholder={bankFx.bank_fc_suggested != null ? `${$i18n.t('at the rate')}: ${fmt(bankFx.bank_fc_suggested)}` : ''}
+													class="text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden w-40"
+												/>
+											</div>
+											<div>
+												<label class="block text-[10px] font-medium text-gray-500 dark:text-gray-400 mb-1" for="pay-rate-{f.id}">
+													{$i18n.t('Rate')} {bankFx.bank_currency} → {bankFx.base_currency}
+												</label>
+												<input
+													id="pay-rate-{f.id}"
+													type="number"
+													step="0.00000001"
+													bind:value={bankRate}
+													on:change={() => loadPreview(f)}
+													placeholder={bankFx.rate != null ? `${bankFx.rate} (${bankFx.rate_source})` : $i18n.t('no rate on file — type it')}
+													class="text-xs rounded-lg px-2 py-1.5 bg-white dark:bg-gray-850 dark:text-gray-200 border border-gray-200 dark:border-gray-800 outline-hidden w-40"
+												/>
+											</div>
+										{/if}
 										<button
 											class="px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-800 transition disabled:opacity-50"
-											disabled={processing || !bankAccountId || (preview?.missing?.length ?? 0) > 0}
+											disabled={processing || !bankAccountId || (preview?.missing?.length ?? 0) > 0 || (foreignBank && numOr(bankFcAmount) === undefined)}
 											on:click={() => confirmPay(f)}
 										>
 											{processing ? $i18n.t('Recording...') : $i18n.t('Record payment')}
@@ -305,6 +353,15 @@
 													</tr>
 												</tbody>
 											</table>
+											{#if foreignBank}
+												<div class="text-gray-500 dark:text-gray-400 mt-1">
+													{$i18n.t('Paid from a {{ccy}} account: the obligations are cleared in {{base}} through the exchange clearing account, then the clearing is moved to the bank in {{ccy}}.', { ccy: bankFx.bank_currency, base: bankFx.base_currency })}
+													{#if bankFx.fx_kind}
+														— {$i18n.t(bankFx.fx_kind === 'loss' ? 'exchange loss' : 'exchange gain')} {fmt(Math.abs(bankFx.fx_base))} {bankFx.base_currency}
+														→ {bankFx.fx_account ? `${bankFx.fx_account.code} ${bankFx.fx_account.name}` : $i18n.t('account not set')}
+													{/if}
+												</div>
+											{/if}
 											{#each preview.warnings ?? [] as w}
 												<div class="text-amber-700 dark:text-amber-300 mt-1">{w}</div>
 											{/each}

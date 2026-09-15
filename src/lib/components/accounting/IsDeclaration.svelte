@@ -11,6 +11,7 @@
 		getTaxFilings,
 		getAccounts,
 		recordProvisionalTaxPayment,
+		getBankFxContext,
 		type CitAdjustment
 	} from '$lib/apis/accounting';
 	import { fiscalYearStart, fiscalYearEnd, fiscalYearLabel } from '$lib/utils/fiscalYear';
@@ -133,6 +134,34 @@
 	let provPeriodEnd = '';
 	let recording = false;
 	let showProvisional = false;
+	// Foreign-currency bank account: the amount debited in its currency and the rate.
+	let provFx: any = null;
+	let provFcAmount: string | number | null = '';
+	let provRate: string | number | null = '';
+	let provFxTimer: any = null;
+	const refreshProvFx = async () => {
+		if (!provBank) {
+			provFx = null;
+			return;
+		}
+		try {
+			provFx = await getBankFxContext(companyId, {
+				bank_account_id: Number(provBank),
+				on_date: provDate || undefined,
+				amount: num(provAmount),
+				bank_fc_amount: num(provFcAmount),
+				rate: num(provRate)
+			});
+		} catch {
+			provFx = null;
+		}
+	};
+	$: {
+		void [provBank, provDate, provAmount, provFcAmount, provRate];
+		clearTimeout(provFxTimer);
+		provFxTimer = setTimeout(refreshProvFx, 250);
+	}
+	$: provForeign = !!provFx?.foreign;
 
 	$: provYears = (() => {
 		const t = provDate || today();
@@ -304,6 +333,10 @@
 			toast.error($i18n.t('Select the fiscal year the instalment relates to'));
 			return;
 		}
+		if (provForeign && num(provFcAmount) === undefined) {
+			toast.error($i18n.t('Enter the amount debited in {{ccy}}', { ccy: provFx.bank_currency }));
+			return;
+		}
 		recording = true;
 		try {
 			const r = await recordProvisionalTaxPayment(companyId, {
@@ -311,13 +344,17 @@
 				bank_account_id: Number(provBank),
 				paid_date: provDate || undefined,
 				reference: provRef || undefined,
-				period_end: provPeriodEnd
+				period_end: provPeriodEnd,
+				bank_fc_amount: provForeign ? num(provFcAmount) : undefined,
+				rate: provForeign ? num(provRate) : undefined
 			});
 			toast.success(
 				$i18n.t('Provisional tax payment recorded') + (r?.entry_number ? ` (${r.entry_number})` : r?.entry_status === 'draft' ? ` (${$i18n.t('draft')})` : '')
 			);
 			provAmount = '';
 			provRef = '';
+			provFcAmount = '';
+			provRate = '';
 			showProvisional = false;
 			if (result) await calc();
 		} catch (err: any) {
@@ -492,6 +529,18 @@
 						{#each bankAccounts as b}<option value={b.id}>{b.code} - {b.name}</option>{/each}
 					</select>
 				</div>
+				{#if provForeign}
+					<div>
+						<label class={lblCls} for="prov-fc">{$i18n.t('Amount debited')} ({provFx.bank_currency})</label>
+						<input id="prov-fc" type="number" step="0.01" bind:value={provFcAmount}
+							placeholder={provFx.bank_fc_suggested != null ? `${$i18n.t('at the rate')}: ${fmt(provFx.bank_fc_suggested)}` : ''} class={inputCls} />
+					</div>
+					<div>
+						<label class={lblCls} for="prov-rate">{$i18n.t('Rate')} {provFx.bank_currency} → {provFx.base_currency}</label>
+						<input id="prov-rate" type="number" step="0.00000001" bind:value={provRate}
+							placeholder={provFx.rate != null ? `${provFx.rate} (${provFx.rate_source})` : $i18n.t('no rate on file — type it')} class={inputCls} />
+					</div>
+				{/if}
 				<div>
 					<label class={lblCls} for="prov-ref">{$i18n.t('Reference')}</label>
 					<input id="prov-ref" type="text" bind:value={provRef} placeholder={$i18n.t('demand note no.')} class={inputCls} />
@@ -500,6 +549,18 @@
 					{recording ? $i18n.t('Recording...') : $i18n.t('Record payment')}
 				</button>
 			</div>
+			{#if provForeign}
+				<div class="text-[11px] mt-2 {provFx.missing?.length ? 'text-red-700 dark:text-red-300' : 'text-gray-500 dark:text-gray-400'}">
+					{#if provFx.missing?.length}
+						{$i18n.t('Missing')}: {provFx.missing.join(' · ')}
+					{:else}
+						{$i18n.t('Booked in {{base}} through the exchange clearing account, then moved to the bank in {{ccy}}.', { base: provFx.base_currency, ccy: provFx.bank_currency })}
+						{#if provFx.fx_kind}
+							{$i18n.t(provFx.fx_kind === 'loss' ? 'Exchange loss' : 'Exchange gain')}: {fmt(Math.abs(provFx.fx_base))} {provFx.base_currency} → {provFx.fx_account ? `${provFx.fx_account.code} ${provFx.fx_account.name}` : ''}
+						{/if}
+					{/if}
+				</div>
+			{/if}
 		</div>
 	{/if}
 

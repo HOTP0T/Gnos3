@@ -1258,6 +1258,14 @@
 						</tbody>
 					</table>
 				</div>
+				{#if bookingPlan.exchange_rate && bookingPlan.exchange_rate.currency !== bookingPlan.exchange_rate.base}
+					<div class="text-[11px] {bookingPlan.exchange_rate.rate ? 'text-gray-500 dark:text-gray-400' : 'text-red-700 dark:text-red-300'}">
+						{bookingPlan.exchange_rate.currency} → {bookingPlan.exchange_rate.base}:
+						{bookingPlan.exchange_rate.rate
+							? `${bookingPlan.exchange_rate.rate} (${$i18n.t('rate on file')}, ${bookingPlan.exchange_rate.date})`
+							: $i18n.t('no rate on file for {{date}} — add it in Exchange Rates', { date: bookingPlan.exchange_rate.date })}
+					</div>
+				{/if}
 				{#each bookingPlan.warnings ?? [] as w}
 					<div class="text-[11px] text-amber-700 dark:text-amber-300">{w}</div>
 				{/each}

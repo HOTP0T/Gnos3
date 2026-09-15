@@ -374,6 +374,8 @@ export const getPaymentPreview = async (params: {
 	reference?: string;
 	debit_account_id?: number;
 	credit_account_id?: number;
+	currency?: string;
+	payment_date?: string;
 }) => apiGet('/payments/preview', params as any);
 
 export const createPayment = async (data: Record<string, any>, company_id?: number, bank_statement_line_id?: number) =>
@@ -889,8 +891,23 @@ export const getTaxAccounts = async (companyId: number) =>
 export const updateTaxAccounts = async (companyId: number, mappings: Record<string, number[]>) =>
 	apiPut(`/companies/${companyId}/tax-accounts`, { mappings });
 
-export const getTaxPaymentPreview = async (filingId: number, payableAccountId?: number, assessedAmount?: number) =>
-	apiGet(`/tax-filings/${filingId}/payment-preview`, { payable_account_id: payableAccountId, assessed_amount: assessedAmount });
+export const getTaxPaymentPreview = async (
+	filingId: number,
+	payableAccountId?: number,
+	assessedAmount?: number,
+	bank?: { bank_account_id?: number; bank_fc_amount?: number; rate?: number; paid_date?: string }
+) =>
+	apiGet(`/tax-filings/${filingId}/payment-preview`, {
+		payable_account_id: payableAccountId,
+		assessed_amount: assessedAmount,
+		...(bank ?? {})
+	});
+
+/** Currency of a bank ledger account, the rate on file and the foreign amount a base amount implies. */
+export const getBankFxContext = async (
+	companyId: number,
+	params: { bank_account_id: number; on_date?: string; amount?: number; bank_fc_amount?: number; rate?: number }
+) => apiGet(`/companies/${companyId}/bank-fx-context`, params as any);
 
 export type CitAdjustment = { label: string; amount: number; kind: 'add' | 'deduct' };
 
@@ -920,7 +937,15 @@ export const computeCitDeclaration = async (
 /** Provisional (prepaid) income tax demanded by the tax office: DR prepaid tax / CR bank. */
 export const recordProvisionalTaxPayment = async (
 	companyId: number,
-	data: { amount: number; bank_account_id: number; paid_date?: string; reference?: string; period_end?: string }
+	data: {
+		amount: number;
+		bank_account_id: number;
+		paid_date?: string;
+		reference?: string;
+		period_end?: string;
+		bank_fc_amount?: number;
+		rate?: number;
+	}
 ) => apiPost(`/companies/${companyId}/provisional-tax-payment`, data);
 
 export const getTaxFilings = async (params: { company_id: number; tax_type?: string }) =>
@@ -931,7 +956,14 @@ export const saveTaxFiling = async (companyId: number, data: Record<string, any>
 
 export const markTaxFilingPaid = async (
 	filingId: number,
-	data: { bank_account_id: number; paid_date?: string; payable_account_id?: number; assessed_amount?: number }
+	data: {
+		bank_account_id: number;
+		paid_date?: string;
+		payable_account_id?: number;
+		assessed_amount?: number;
+		bank_fc_amount?: number;
+		rate?: number;
+	}
 ) => apiPost(`/tax-filings/${filingId}/mark-paid`, data);
 
 export const deleteTaxFiling = async (filingId: number) => apiDelete(`/tax-filings/${filingId}`);
