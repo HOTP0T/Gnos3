@@ -1187,11 +1187,22 @@
 										{#if line.match_status === 'partial_matched'}
 											<button class="ml-1 text-xs text-red-500 hover:text-red-700 transition" on:click={() => handleUnmatch(line.id)}>{$i18n.t('Unmatch')}</button>
 										{:else}
+											<!-- Record the line as a payment: the form resolves the bank side from this
+											     bank account and the settled account from a bank-line rule, the bank
+											     account's defaults or the company AP/AR default — nothing is guessed. -->
 											<button
-												class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded transition {line.suggested_bank_fee_rule ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50' : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'}"
+												class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded transition {line.suggested_bank_fee_rule ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50'}"
+												title={line.suggested_bank_fee_rule ? $i18n.t('A bank-line rule matches this description — the payment form will pre-fill the account') : $i18n.t('Record this line as a payment (the settled account is resolved from rules and defaults)')}
+												on:click|stopPropagation={() => handlePay(line)}
+											>
+												{line.suggested_bank_fee_rule ? $i18n.t('Bank Fee') : $i18n.t('Record Payment')}
+											</button>
+											<button
+												class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded transition bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
+												title={$i18n.t('Write a journal entry by hand for this line (interest, a transfer, an unusual movement)')}
 												on:click={() => openCreateEntry(line)}
 											>
-												{line.suggested_bank_fee_rule ? $i18n.t('Bank Fee') : $i18n.t('Create Entry')}
+												{$i18n.t('Journal')}
 											</button>
 												<button class="ml-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition" on:click={() => handleExclude(line.id)}>{$i18n.t('Exclude')}</button>
 										{/if}
