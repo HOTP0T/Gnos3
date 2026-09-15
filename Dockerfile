@@ -49,7 +49,11 @@ ENV npm_config_registry=$NPM_REGISTRY \
     npm_config_fetch_retries=5 \
     npm_config_fetch_retry_mintimeout=20000 \
     npm_config_fetch_retry_maxtimeout=180000
-RUN npm ci --legacy-peer-deps
+# Cache npm's store for the same reason pip's is cached below: on a link
+# that stalls mid-install, a failed attempt must keep what it fetched or
+# retries can never converge. EIDLETIMEOUT here was costing whole builds.
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --legacy-peer-deps
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
