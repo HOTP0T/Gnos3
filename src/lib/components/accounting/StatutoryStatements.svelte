@@ -174,6 +174,11 @@
 			<div class="px-3 py-2 text-sm rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300">
 				{$i18n.t('Assets do not equal liabilities plus equity. The ledger detail behind one of the lines needs review.')}
 			</div>
+		{:else}
+			<div class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300">
+				<span aria-hidden="true">✓</span>
+				{$i18n.t('Balanced — total assets equal liabilities plus equity in both columns')}
+			</div>
 		{/if}
 		{#if bs.unmapped?.length}
 			<div class="px-3 py-2 text-xs rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300">
