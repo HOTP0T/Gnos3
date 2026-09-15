@@ -49,9 +49,17 @@ ENV npm_config_registry=$NPM_REGISTRY \
     npm_config_fetch_retries=5 \
     npm_config_fetch_retry_mintimeout=20000 \
     npm_config_fetch_retry_maxtimeout=180000
-# Cache npm's store for the same reason pip's is cached below: on a link
-# that stalls mid-install, a failed attempt must keep what it fetched or
-# retries can never converge. EIDLETIMEOUT here was costing whole builds.
+# Cache npm's store: on a link that stalls mid-install, a failed attempt
+# must keep what it fetched or retries can never converge.
+#
+# CYPRESS_INSTALL_BINARY=0 skips Cypress's postinstall, which downloads a
+# ~200MB test-runner binary from download.cypress.io. cypress is a
+# devDependency used only by `npm run cy:open`; the image runs `vite build`
+# and never opens a browser, so the binary is pure waste here. It is also
+# what actually broke this build repeatedly -- the failure surfaced as a
+# generic npm EIDLETIMEOUT, masking that it was one oversized download from
+# a single flaky host rather than the package registry.
+ENV CYPRESS_INSTALL_BINARY=0
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
     npm ci --legacy-peer-deps
 
