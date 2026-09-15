@@ -170,21 +170,28 @@ ARG TORCH_INDEX_URL=https://download.pytorch.org/whl
 ENV PIP_INDEX_URL=$PIP_INDEX_URL \
     UV_DEFAULT_INDEX=$PIP_INDEX_URL
 
-RUN set -e; \
-    pip3 install --no-cache-dir uv; \
+# BuildKit cache mounts: a failed attempt keeps every wheel it already
+# fetched, so retries accumulate instead of restarting from zero. On a link
+# that stalls or truncates large downloads this is the difference between
+# "eventually succeeds" and "never succeeds" -- torch alone is 184MB.
+# The caches live in the mount, not the layer, so the image does not grow.
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+    set -e; \
+    pip3 install uv; \
     if [ "$USE_CUDA" = "true" ]; then \
     # If you use CUDA the whisper and embedding model will be downloaded on first use
     # fix: pin torch<=2.9.1 - torch 2.10.0 aarch64 wheels cause SIGILL on ARM devices (RPi 4 Cortex-A72) #21349
-    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url ${TORCH_INDEX_URL}/$USE_CUDA_DOCKER_VER --no-cache-dir; \
-    uv pip install --system -r requirements.txt --no-cache-dir; \
+    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url ${TORCH_INDEX_URL}/$USE_CUDA_DOCKER_VER; \
+    uv pip install --system -r requirements.txt; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
     python -c "import os; from faster_whisper import WhisperModel; WhisperModel(os.environ['WHISPER_MODEL'], device='cpu', compute_type='int8', download_root=os.environ['WHISPER_MODEL_DIR'])"; \
     python -c "import os; import tiktoken; tiktoken.get_encoding(os.environ['TIKTOKEN_ENCODING_NAME'])"; \
     python -c "import nltk; nltk.download('punkt_tab')"; \
     else \
-    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url ${TORCH_INDEX_URL}/cpu --no-cache-dir; \
-    uv pip install --system -r requirements.txt --no-cache-dir; \
+    pip3 install 'torch<=2.9.1' torchvision torchaudio --index-url ${TORCH_INDEX_URL}/cpu; \
+    uv pip install --system -r requirements.txt; \
     if [ "$USE_SLIM" != "true" ]; then \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['RAG_EMBEDDING_MODEL'], device='cpu')"; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ.get('AUXILIARY_EMBEDDING_MODEL', 'TaylorAI/bge-micro-v2'), device='cpu')"; \
