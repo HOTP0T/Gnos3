@@ -152,6 +152,14 @@ COPY --chown=$UID:$GID ./backend/requirements.txt ./requirements.txt
 # Set UV_LINK_MODE to copy to prevent 0-byte file corruption in QEMU arm64 cross-builds
 ENV UV_LINK_MODE=copy
 
+# Same problem as npm above, on the Python side. pip's 15s default read
+# timeout is not enough for a multi-hundred-MB torch wheel over a slow or
+# long-haul link: the stream stalls and the whole layer dies with
+# ReadTimeoutError from download.pytorch.org. Be patient and retry instead.
+ENV PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=10 \
+    UV_HTTP_TIMEOUT=300
+
 RUN set -e; \
     pip3 install --no-cache-dir uv; \
     if [ "$USE_CUDA" = "true" ]; then \
