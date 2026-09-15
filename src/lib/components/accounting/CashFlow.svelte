@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
+	import { buildMonthOptions, type MonthOption } from '$lib/utils/fiscalYear';
 	import { toast } from 'svelte-sonner';
-	import { getCashFlow, getPeriods, exportCashFlow } from '$lib/apis/accounting';
+	import { getCashFlow, getPeriods, getCompany, exportCashFlow } from '$lib/apis/accounting';
 	import type { Writable } from 'svelte/store';
 	import { convertAmount } from '$lib/utils/currency';
 	import ReportAmount from '$lib/components/accounting/ReportAmount.svelte';
@@ -32,30 +33,9 @@
 	$: data = rawData;
 
 	let selectedMonth = '';
-	let monthOptions: Array<{ value: string; label: string; from: string; to: string; fiscalStart: string }> = [];
+	let monthOptions: MonthOption[] = [];
 
-	function buildMonthOptions(periods: any[]) {
-		const options: typeof monthOptions = [];
-		for (const p of periods) {
-			const start = new Date(p.start_date);
-			const end = new Date(p.end_date);
-			const fiscalStart = p.start_date;
-			let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-			while (cursor <= end) {
-				const y = cursor.getFullYear();
-				const m = cursor.getMonth();
-				const from = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-				const lastDay = new Date(y, m + 1, 0).getDate();
-				const to = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-				const label = cursor.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
-				options.push({ value: `${y}-${String(m + 1).padStart(2, '0')}`, label, from, to, fiscalStart });
-				cursor = new Date(y, m + 1, 1);
-			}
-		}
-		const seen = new Map<string, (typeof options)[0]>();
-		for (const o of options) seen.set(o.value, o);
-		return Array.from(seen.values()).sort((a, b) => b.value.localeCompare(a.value));
-	}
+	let fiscalStartMonth = 1;
 
 	const fmt = (v: any): string => {
 		const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0);
@@ -74,9 +54,10 @@
 
 	onMount(async () => {
 		try {
-			const res = await getPeriods({ company_id: companyId });
+			const [res, co] = await Promise.all([getPeriods({ company_id: companyId }), getCompany(companyId).catch(() => null)]);
 			const periods = res.periods ?? res ?? [];
-			monthOptions = buildMonthOptions(periods);
+			fiscalStartMonth = Number(co?.fiscal_year_start_month ?? 1) || 1;
+			monthOptions = buildMonthOptions(periods, fiscalStartMonth);
 			if (monthOptions.length > 0) selectedMonth = monthOptions[0].value;
 		} catch {}
 	});

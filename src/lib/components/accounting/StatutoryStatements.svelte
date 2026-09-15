@@ -1,15 +1,18 @@
 <script lang="ts">
 	// Statutory financial statements — the fixed-line filings a jurisdiction
 	// prescribes, as opposed to the account-by-account reports next door. Which
-	// layout applies is decided by the company's country on the backend; today
-	// that is China (小企业会计准则). The component renders whatever line list the
-	// API returns, so a second country needs no change here.
+	// layout applies is decided by the company's country on the backend: China
+	// (小企业会计准则, assets side by side with liabilities + equity) and Hong Kong
+	// (SME-FRS, one vertical column down to net assets, then equity). The
+	// component renders whatever line list the API returns.
 	import { onMount, getContext } from 'svelte';
+	import { buildMonthOptions, type MonthOption } from '$lib/utils/fiscalYear';
 	import { toast } from 'svelte-sonner';
 	import type { Writable } from 'svelte/store';
 
 	import {
 		getPeriods,
+		getCompany,
 		getStatutoryBalanceSheet,
 		getStatutoryProfitLoss,
 		exportStatutoryBalanceSheet,
@@ -23,6 +26,20 @@
 	const i18n = getContext('i18n');
 	export let companyId: number;
 	export let layoutLabel: string | null = null;
+	export let layoutKey: string | null = null;
+	export let presentation: 'side_by_side' | 'vertical' | null = null;
+
+	$: hk = layoutKey === 'hk_sme';
+	$: vertical = (presentation ?? (hk ? 'vertical' : 'side_by_side')) === 'vertical';
+	$: tabs = hk
+		? [
+				{ id: 'balance-sheet', label: 'Statement of Financial Position 財務狀況表' },
+				{ id: 'profit-loss', label: 'Statement of Profit or Loss 損益表' }
+			]
+		: [
+				{ id: 'balance-sheet', label: '资产负债表 Balance Sheet' },
+				{ id: 'profit-loss', label: '利润表 P&L' }
+			];
 
 	type Which = 'balance-sheet' | 'profit-loss';
 	let which: Which = 'balance-sheet';
@@ -49,35 +66,13 @@
 	};
 
 	let selectedMonth = '';
-	let monthOptions: Array<{ value: string; label: string; to: string }> = [];
+	let monthOptions: MonthOption[] = [];
 
-	function buildMonthOptions(periods: any[]) {
-		const out: typeof monthOptions = [];
-		for (const p of periods) {
-			const start = new Date(p.start_date);
-			const end = new Date(p.end_date);
-			let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-			while (cursor <= end) {
-				const y = cursor.getFullYear();
-				const m = cursor.getMonth();
-				const lastDay = new Date(y, m + 1, 0).getDate();
-				out.push({
-					value: `${y}-${String(m + 1).padStart(2, '0')}`,
-					label: cursor.toLocaleDateString(undefined, { year: 'numeric', month: 'long' }),
-					to: `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-				});
-				cursor = new Date(y, m + 1, 1);
-			}
-		}
-		const seen = new Map<string, (typeof out)[0]>();
-		for (const o of out) seen.set(o.value, o);
-		return Array.from(seen.values()).sort((a, b) => b.value.localeCompare(a.value));
-	}
 
 	onMount(async () => {
 		try {
-			const res = await getPeriods({ company_id: companyId });
-			monthOptions = buildMonthOptions(res.periods ?? res ?? []);
+			const [res, co] = await Promise.all([getPeriods({ company_id: companyId }), getCompany(companyId).catch(() => null)]);
+			monthOptions = buildMonthOptions(res.periods ?? res ?? [], Number(co?.fiscal_year_start_month ?? 1) || 1);
 			const now = new Date();
 			const curKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 			selectedMonth = monthOptions.find((o) => o.value === curKey)?.value ?? monthOptions[0]?.value ?? '';
@@ -118,7 +113,9 @@
 		load();
 	}
 
-	const label = (l: StatementLine) => `${l.label_zh} ${l.label_en}`.trim();
+	const label = (l: StatementLine) => (hk ? `${l.label_en}  ${l.label_zh}` : `${l.label_zh} ${l.label_en}`).trim();
+	const visible = (rows: any[]) => (rows ?? []).filter((l: any) => !l.hidden);
+	const monthHeader = (m: string) => (m.includes('-') ? m : `${pl?.fiscal_year}/${m}`);
 	const rowClass = (l: StatementLine) =>
 		l.header
 			? 'font-semibold text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-850/40'
@@ -135,7 +132,7 @@
 	<!-- Controls -->
 	<div class="flex flex-wrap items-center gap-3">
 		<div class="flex gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1 w-fit">
-			{#each [{ id: 'balance-sheet', label: '资产负债表 Balance Sheet' }, { id: 'profit-loss', label: '利润表 P&L' }] as t}
+			{#each tabs as t}
 				<button
 					class="px-3 py-1.5 text-sm font-medium rounded-md transition
 						{which === t.id
@@ -185,16 +182,23 @@
 			</div>
 		{/if}
 
-		<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-			{#each [{ title: '资产 ASSETS', rows: bs.assets }, { title: '负债和所有者权益 LIABILITIES AND EQUITY', rows: [...bs.liabilities, ...bs.equity] }] as block}
-				<div class="overflow-x-auto">
+		<div class="grid grid-cols-1 {vertical ? '' : 'xl:grid-cols-2'} gap-4">
+			{#each vertical
+				? [{ title: `${bs.company_name} — ${$i18n.t('as at')} ${bs.as_of}`, rows: [...visible(bs.assets), ...visible(bs.liabilities), ...visible(bs.equity)] }]
+				: [{ title: '资产 ASSETS', rows: bs.assets }, { title: '负债和所有者权益 LIABILITIES AND EQUITY', rows: [...bs.liabilities, ...bs.equity] }] as block}
+				<div class="overflow-x-auto {vertical ? 'max-w-4xl' : ''}">
 					<table class="w-full text-xs">
 						<thead class="text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
 							<tr>
 								<th class="px-2 py-2 text-left">{block.title}</th>
-								<th class="px-2 py-2 text-center w-12">{$i18n.t('Line')}</th>
-								<th class="px-2 py-2 text-right w-32">{bs.beginning_date}</th>
-								<th class="px-2 py-2 text-right w-32">{bs.as_of}</th>
+								<th class="px-2 py-2 text-center w-12">{$i18n.t(vertical ? 'Note' : 'Line')}</th>
+								{#if vertical}
+									<th class="px-2 py-2 text-right w-32">{bs.as_of}</th>
+									<th class="px-2 py-2 text-right w-32">{bs.beginning_date}</th>
+								{:else}
+									<th class="px-2 py-2 text-right w-32">{bs.beginning_date}</th>
+									<th class="px-2 py-2 text-right w-32">{bs.as_of}</th>
+								{/if}
 							</tr>
 						</thead>
 						<tbody>
@@ -203,10 +207,10 @@
 									<td class="px-2 py-1.5" style="padding-left: {0.5 + l.indent * 1}rem">{label(l)}</td>
 									<td class="px-2 py-1.5 text-center text-gray-400">{l.line_no ?? ''}</td>
 									<td class="px-2 py-1.5 text-right font-mono">
-										{#if !l.header}<ReportAmount value={l.beginning} {...fxProps} />{/if}
+										{#if !l.header}<ReportAmount value={vertical ? l.ending : l.beginning} {...fxProps} />{/if}
 									</td>
 									<td class="px-2 py-1.5 text-right font-mono">
-										{#if !l.header}<ReportAmount value={l.ending} {...fxProps} />{/if}
+										{#if !l.header}<ReportAmount value={vertical ? l.beginning : l.ending} {...fxProps} />{/if}
 									</td>
 								</tr>
 							{/each}
@@ -226,16 +230,16 @@
 			<table class="w-full text-xs">
 				<thead class="text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
 					<tr>
-						<th class="px-2 py-2 text-left">项目 Item</th>
-						<th class="px-2 py-2 text-center w-12">{$i18n.t('Line')}</th>
+						<th class="px-2 py-2 text-left">{hk ? 'Item' : '项目 Item'}</th>
+						<th class="px-2 py-2 text-center w-12">{$i18n.t(hk ? 'Note' : 'Line')}</th>
 						{#each monthsShown as m}
-							<th class="px-2 py-2 text-right w-28">{pl.fiscal_year}/{m}</th>
+							<th class="px-2 py-2 text-right w-28">{monthHeader(m)}</th>
 						{/each}
 						<th class="px-2 py-2 text-right w-32 font-semibold">YTD {pl.fiscal_year}</th>
 					</tr>
 				</thead>
 				<tbody>
-					{#each pl.lines as l}
+					{#each visible(pl.lines) as l}
 						<tr class="border-b border-gray-50 dark:border-gray-850/30 {rowClass(l)}">
 							<td class="px-2 py-1.5" style="padding-left: {0.5 + l.indent * 1}rem">{label(l)}</td>
 							<td class="px-2 py-1.5 text-center text-gray-400">{l.line_no ?? ''}</td>

@@ -46,8 +46,37 @@
 			surcharge_local_education_rate: pct(c.surcharge_local_education_rate),
 			cit_rate: pct(c.cit_rate),
 			cit_preferential_rate: pct(c.cit_preferential_rate),
-			ir_rate: pct(c.ir_rate)
+			ir_rate: pct(c.ir_rate),
+			// Jurisdiction shape (Hong Kong: no VAT, tiered profits tax with provisional prepayments, MPF)
+			has_vat: c.has_vat !== false,
+			cit_label: c.cit_label ?? '',
+			cit_frequency: c.cit_frequency ?? 'yearly',
+			cit_tiers: (c.cit_tiers ?? [])
+				.map((t: any) => `${t.up_to ?? ''}:${+(Number(t.rate) * 100).toFixed(6)}`)
+				.join(', '),
+			cit_reduction_rate: pct(c.cit_reduction_rate),
+			cit_reduction_cap: c.cit_reduction_cap ?? '',
+			cit_provisional: !!c.cit_provisional,
+			tax_year_start_month: Number(c.tax_year_start_month ?? 1) || 1,
+			withholds_iit: c.withholds_iit !== false,
+			payroll_scheme: c.payroll_scheme ?? ''
 		};
+	}
+
+	// "2000000:8.25, :16.5" → [{up_to: 2000000, rate: 0.0825}, {up_to: null, rate: 0.165}]
+	function parseTiers(raw: string): any[] | null {
+		const tiers = String(raw ?? '')
+			.split(',')
+			.map((s) => s.trim())
+			.filter(Boolean)
+			.map((s) => {
+				const [cap, rate] = s.split(':').map((x) => x.trim());
+				const r = Number(rate) / 100;
+				if (isNaN(r)) return null;
+				return { up_to: cap === '' ? null : Number(cap), rate: r };
+			})
+			.filter(Boolean);
+		return tiers.length ? tiers : null;
 	}
 
 	function selectCountry() {
@@ -122,7 +151,17 @@
 				surcharge_local_education_rate: dec(form.surcharge_local_education_rate) ?? 0,
 				cit_rate: dec(form.cit_rate),
 				cit_preferential_rate: dec(form.cit_preferential_rate),
-				ir_rate: dec(form.ir_rate)
+				ir_rate: dec(form.ir_rate),
+				has_vat: !!form.has_vat,
+				cit_label: form.cit_label || null,
+				cit_frequency: form.cit_frequency || 'yearly',
+				cit_tiers: parseTiers(form.cit_tiers),
+				cit_reduction_rate: dec(form.cit_reduction_rate),
+				cit_reduction_cap: form.cit_reduction_cap === '' || form.cit_reduction_cap === null ? null : Number(form.cit_reduction_cap),
+				cit_provisional: !!form.cit_provisional,
+				tax_year_start_month: Number(form.tax_year_start_month) || 1,
+				withholds_iit: !!form.withholds_iit,
+				payroll_scheme: form.payroll_scheme || null
 			};
 			const updated = await updateCountryConfig(form.country, payload);
 			const idx = configs.findIndex((c) => c.country === form.country);
@@ -280,17 +319,73 @@
 					</div>
 				</div>
 
+				<!-- Jurisdiction shape -->
+				<div class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30">
+					<div class="text-sm font-medium dark:text-gray-200 mb-1">{$i18n.t('What this country levies')}</div>
+					<div class="text-[11px] text-gray-400 dark:text-gray-500 mb-3">
+						{$i18n.t('Hong Kong: no VAT, a yearly two-tier Profits Tax with provisional prepayments, no salary withholding, MPF. Everything below is read by the Tax tab, the booking engine and the closing checklist.')}
+					</div>
+					<div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+						<label class="flex items-center gap-2 text-sm dark:text-gray-200">
+							<input type="checkbox" bind:checked={form.has_vat} />
+							{$i18n.t('Levies VAT / GST')}
+						</label>
+						<label class="flex items-center gap-2 text-sm dark:text-gray-200">
+							<input type="checkbox" bind:checked={form.withholds_iit} />
+							{$i18n.t('Employer withholds personal income tax')}
+						</label>
+						<label class="flex items-center gap-2 text-sm dark:text-gray-200">
+							<input type="checkbox" bind:checked={form.cit_provisional} />
+							{$i18n.t('Tax office bills provisional (prepaid) income tax')}
+						</label>
+						<div>
+							<label class={labelCls} for="cc-tysm">{$i18n.t('Year of assessment starts in month')}</label>
+							<input id="cc-tysm" type="number" min="1" max="12" class={inputCls} bind:value={form.tax_year_start_month} />
+						</div>
+						<div>
+							<label class={labelCls} for="cc-payroll">{$i18n.t('Mandatory pension scheme')}</label>
+							<select id="cc-payroll" class={inputCls} bind:value={form.payroll_scheme}>
+								<option value="">{$i18n.t('— none —')}</option>
+								<option value="mpf">MPF (Hong Kong)</option>
+							</select>
+						</div>
+					</div>
+				</div>
+
 				<!-- Income taxes -->
 				<div class="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-100/30 dark:border-gray-850/30">
 					<div class="text-sm font-medium dark:text-gray-200 mb-3">{$i18n.t('Income taxes (IS / IR)')}</div>
 					<div class="grid grid-cols-1 md:grid-cols-3 gap-3">
 						<div>
+							<label class={labelCls} for="cc-citlabel">{$i18n.t('Corporate tax name')}</label>
+							<input id="cc-citlabel" type="text" class={inputCls} placeholder="IS / 企业所得税 / Profits Tax" bind:value={form.cit_label} />
+						</div>
+						<div>
+							<label class={labelCls} for="cc-citfreq">{$i18n.t('Computed')}</label>
+							<select id="cc-citfreq" class={inputCls} bind:value={form.cit_frequency}>
+								<option value="yearly">{$i18n.t('Yearly')}</option>
+								<option value="quarterly">{$i18n.t('Quarterly (cumulative prepayments)')}</option>
+							</select>
+						</div>
+						<div>
 							<label class={labelCls} for="cc-cit">{$i18n.t('Corporate (IS/CIT) rate')} (%)</label>
 							<input id="cc-cit" type="number" step="0.01" class={inputCls} bind:value={form.cit_rate} />
 						</div>
 						<div>
+							<label class={labelCls} for="cc-tiers">{$i18n.t('Tiered rates')} <span class="text-gray-400">(up_to:rate%, …)</span></label>
+							<input id="cc-tiers" type="text" class={inputCls} placeholder="2000000:8.25, :16.5" bind:value={form.cit_tiers} />
+						</div>
+						<div>
 							<label class={labelCls} for="cc-citp">{$i18n.t('CIT preferential rate')} (%)</label>
 							<input id="cc-citp" type="number" step="0.01" class={inputCls} bind:value={form.cit_preferential_rate} />
+						</div>
+						<div>
+							<label class={labelCls} for="cc-red">{$i18n.t('One-off tax reduction')} (%)</label>
+							<input id="cc-red" type="number" step="0.01" class={inputCls} bind:value={form.cit_reduction_rate} />
+						</div>
+						<div>
+							<label class={labelCls} for="cc-redcap">{$i18n.t('Reduction cap (amount)')}</label>
+							<input id="cc-redcap" type="number" step="0.01" class={inputCls} bind:value={form.cit_reduction_cap} />
 						</div>
 						<div>
 							<label class={labelCls} for="cc-ir">{$i18n.t('Individual (IR) rate')} (%)</label>

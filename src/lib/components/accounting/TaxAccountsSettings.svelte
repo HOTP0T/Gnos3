@@ -19,11 +19,13 @@
 		account_type: string | null;
 		source: 'mapped' | 'default' | 'missing';
 		accounts: Acct[];
+		applicable?: boolean; // false = the role does not exist in this jurisdiction (VAT in Hong Kong)
 	};
 
 	let loading = true;
 	let saving = false;
 	let country = '';
+	let citLabel = 'Corporate income tax';
 	let roles: Role[] = [];
 	let accounts: Acct[] = [];
 	// Working copy: role → account ids. Only roles the user touched are sent.
@@ -32,12 +34,13 @@
 	// Per-role "add another" picker value (multi roles)
 	let adder: Record<string, number | ''> = {};
 
-	const GROUPS: Array<{ id: string; label: string; hint: string }> = [
+	$: GROUPS = [
 		{ id: 'vat', label: 'VAT', hint: 'Accounts the VAT declaration reads (output / input) and the settlement entry posts to.' },
 		{ id: 'surcharges', label: 'VAT surcharges', hint: 'Only used when the country config levies surcharges on VAT payable (e.g. China 城建税 / 教育费附加).' },
-		{ id: 'cit', label: 'Corporate income tax', hint: 'Accrual entry (expense / payable) and the account the CIT payment debits.' },
-		{ id: 'iit', label: 'Individual income tax', hint: 'Account the IIT payment debits.' }
-	];
+		{ id: 'cit', label: citLabel, hint: 'Accrual entry (expense / payable), the account the tax payment debits, and — where the tax office bills prepayments — the prepaid-tax asset.' },
+		{ id: 'iit', label: 'Individual income tax', hint: 'Account the IIT payment debits.' },
+		{ id: 'payroll', label: 'MPF (Mandatory Provident Fund)', hint: 'Payable to the trustee by the 10th of the following month (employee 5% withheld + employer 5%), and the employer contribution expense.' }
+	] as Array<{ id: string; label: string; hint: string }>;
 
 	$: parentIds = new Set(accounts.map((a) => a.parent_id).filter(Boolean));
 	$: leafAccounts = accounts.filter((a) => !parentIds.has(a.id));
@@ -54,7 +57,9 @@
 		try {
 			const [map, accts] = await Promise.all([getTaxAccounts(companyId), getAccounts({ company_id: companyId, active: true })]);
 			country = map.country ?? '';
-			roles = map.roles ?? [];
+			citLabel = map.cit_label || 'Corporate income tax';
+			// Roles that do not exist in this jurisdiction are not offered at all.
+			roles = (map.roles ?? []).filter((r: Role) => r.applicable !== false);
 			accounts = Array.isArray(accts) ? accts : (accts?.items ?? accts?.accounts ?? []);
 			draft = Object.fromEntries(roles.map((r) => [r.role, r.accounts.map((a) => a.id)]));
 			dirty = new Set();

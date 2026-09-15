@@ -4,6 +4,7 @@
 	import { fade } from 'svelte/transition';
 	import { flyAndScale } from '$lib/utils/transitions';
 	import { toast } from 'svelte-sonner';
+	import { MONTH_NAMES } from '$lib/utils/fiscalYear';
 
 	import {
 		createCompany,
@@ -26,6 +27,8 @@
 	let country = '';
 	let currency = 'USD';
 	let description = '';
+	// Month the fiscal year starts: 1 = calendar year, 4 = April – March (usual in Hong Kong).
+	let fiscalYearStartMonth = 1;
 	let chart_template_id: number | null = null;
 	let period_template_id: number | null = null;
 
@@ -106,6 +109,7 @@
 		if (company) {
 			name = company.name || '';
 			description = company.description || '';
+			fiscalYearStartMonth = Number(company.fiscal_year_start_month ?? 1) || 1;
 			chart_template_id = company.chart_template_id || null;
 			period_template_id = company.period_template_id || null;
 
@@ -184,7 +188,8 @@
 				name: name.trim(),
 				country: country.trim() || null,
 				currency: currency.trim() || 'USD',
-				description: description.trim() || null
+				description: description.trim() || null,
+				fiscal_year_start_month: Number(fiscalYearStartMonth) || 1
 			};
 
 			// Always include template IDs (even null for clearing)
@@ -397,6 +402,25 @@
 							rows="2"
 							class="w-full rounded-lg px-4 py-2 text-sm dark:text-gray-300 dark:bg-gray-900 bg-gray-50 outline-hidden border border-gray-200 dark:border-gray-800 focus:border-blue-500 transition resize-none"
 						></textarea>
+					</div>
+
+					<!-- Fiscal year -->
+					<div>
+						<label for="company-fy" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+							{$i18n.t('Fiscal year starts in')}
+						</label>
+						<select
+							id="company-fy"
+							bind:value={fiscalYearStartMonth}
+							class="w-full rounded-lg px-4 py-2 text-sm dark:text-gray-300 dark:bg-gray-900 bg-gray-50 outline-hidden border border-gray-200 dark:border-gray-800 focus:border-blue-500 transition"
+						>
+							{#each MONTH_NAMES as m, i}
+								<option value={i + 1}>{$i18n.t(m)}{i === 0 ? ` (${$i18n.t('calendar year')})` : i === 3 ? ` (${$i18n.t('April – March')})` : ''}</option>
+							{/each}
+						</select>
+						<div class="text-xs text-gray-400 mt-1">
+							{$i18n.t('Drives the year-to-date columns, the year-end close and the income-tax period. Most Hong Kong companies close on 31 March or 31 December.')}
+						</div>
 					</div>
 
 					<!-- Templates -->

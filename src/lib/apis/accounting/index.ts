@@ -463,6 +463,8 @@ export type StatementLayout = {
 	country: string | null;
 	layout: string | null;
 	label: string | null;
+	presentation?: 'side_by_side' | 'vertical' | null;
+	fiscal_year_start_month?: number;
 	statements: string[];
 };
 
@@ -890,13 +892,35 @@ export const updateTaxAccounts = async (companyId: number, mappings: Record<stri
 export const getTaxPaymentPreview = async (filingId: number, payableAccountId?: number) =>
 	apiGet(`/tax-filings/${filingId}/payment-preview`, { payable_account_id: payableAccountId });
 
+export type CitAdjustment = { label: string; amount: number; kind: 'add' | 'deduct' };
+
 export const getCitDeclaration = async (params: {
 	company_id: number;
 	period_start: string;
 	period_end: string;
 	prior_year_losses?: number;
 	cit_already_paid?: number;
+	provisional_paid?: number;
 }) => apiGet('/reports/cit-declaration', params as any);
+
+/** The profits-tax / CIT form: the accountant's adjustments travel in the body. */
+export const computeCitDeclaration = async (
+	companyId: number,
+	data: {
+		period_start: string;
+		period_end: string;
+		prior_year_losses?: number;
+		cit_already_paid?: number;
+		provisional_paid?: number;
+		adjustments?: CitAdjustment[];
+	}
+) => apiPost('/reports/cit-declaration', data, { company_id: companyId });
+
+/** Provisional (prepaid) income tax demanded by the tax office: DR prepaid tax / CR bank. */
+export const recordProvisionalTaxPayment = async (
+	companyId: number,
+	data: { amount: number; bank_account_id: number; paid_date?: string; reference?: string }
+) => apiPost(`/companies/${companyId}/provisional-tax-payment`, data);
 
 export const getTaxFilings = async (params: { company_id: number; tax_type?: string }) =>
 	apiGet('/tax-filings', params as any);
@@ -919,11 +943,17 @@ export const exportTaxWorksheet = (params: {
 	prior_year_losses?: number;
 	cit_already_paid?: number;
 	opening_credit?: number;
-}) =>
-	downloadFile(
-		`${BASE}/reports/tax-worksheet/export?${qsOf(params)}`,
+	provisional_paid?: number;
+	adjustments?: CitAdjustment[];
+}) => {
+	const { adjustments, ...rest } = params;
+	const q: Record<string, any> = { ...rest };
+	if (adjustments && adjustments.length) q.adjustments = JSON.stringify(adjustments);
+	return downloadFile(
+		`${BASE}/reports/tax-worksheet/export?${qsOf(q)}`,
 		`${params.tax_type}_${params.period_end}.xlsx`
 	);
+};
 
 // ─── Control-account postings (reclassify, per-line human choice) ────
 

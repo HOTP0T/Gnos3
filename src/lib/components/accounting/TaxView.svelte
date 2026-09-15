@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getContext, onMount } from 'svelte';
 
-	import { getTaxAccounts } from '$lib/apis/accounting';
+	import { getTaxAccounts, getTaxConfig } from '$lib/apis/accounting';
 	import TaxDeclaration from './TaxDeclaration.svelte';
 	import IsDeclaration from './IsDeclaration.svelte';
 	import IrDeclaration from './IrDeclaration.svelte';
@@ -14,25 +14,41 @@
 	type TaxTab = 'vat' | 'is' | 'ir' | 'accounts';
 	let activeTab: TaxTab = 'vat';
 
-	const tabs: Array<{ id: TaxTab; label: string }> = [
-		{ id: 'vat', label: 'VAT' },
-		{ id: 'is', label: 'IS' },
-		{ id: 'ir', label: 'IR' },
-		{ id: 'accounts', label: 'Accounts' }
+	// The country decides which taxes exist: Hong Kong has no VAT and no salary
+	// withholding, so those tabs are not shown at all, and the income-tax tab
+	// takes the country's own name (IS / 企业所得税 / Profits Tax).
+	let cfg: any = null;
+	$: hasVat = cfg ? cfg.has_vat !== false : true;
+	$: withholdsIit = cfg ? cfg.withholds_iit !== false : true;
+	$: citLabel = cfg?.cit_label || 'IS';
+	$: tabs = [
+		...(hasVat ? [{ id: 'vat' as TaxTab, label: cfg?.tax_name || 'VAT' }] : []),
+		{ id: 'is' as TaxTab, label: citLabel },
+		...(withholdsIit ? [{ id: 'ir' as TaxTab, label: 'IR' }] : []),
+		{ id: 'accounts' as TaxTab, label: 'Accounts' }
 	];
+	$: if (cfg && !tabs.some((t) => t.id === activeTab)) activeTab = tabs[0].id;
 
-	// Count of unmapped roles — shown on the Accounts tab so a blocked
-	// settlement entry has an obvious place to go.
+	// Count of unmapped roles that exist in this jurisdiction — shown on the
+	// Accounts tab so a blocked settlement entry has an obvious place to go.
 	let missing = 0;
 	const refreshMissing = async () => {
 		try {
 			const map = await getTaxAccounts(companyId);
-			missing = (map.roles ?? []).filter((r: any) => r.source === 'missing').length;
+			missing = (map.roles ?? []).filter((r: any) => r.source === 'missing' && r.applicable !== false).length;
 		} catch {
 			missing = 0;
 		}
 	};
-	onMount(refreshMissing);
+	onMount(async () => {
+		try {
+			cfg = await getTaxConfig(companyId);
+			if (cfg?.has_vat === false) activeTab = 'is';
+		} catch {
+			cfg = null;
+		}
+		await refreshMissing();
+	});
 
 	// Remount the declaration tabs after a mapping change so they re-resolve.
 	let mapVersion = 0;
@@ -63,6 +79,17 @@
 			</button>
 		{/each}
 	</div>
+
+	{#if cfg && (!hasVat || !withholdsIit)}
+		<div class="text-xs text-gray-400 dark:text-gray-500 px-0.5">
+			{#if !hasVat}
+				{$i18n.t('{{country}} levies no VAT / GST: there is no VAT return, and any tax printed on a supplier bill is booked as part of the cost.', { country: cfg.country })}
+			{/if}
+			{#if !withholdsIit}
+				{$i18n.t('Employers do not withhold Salaries Tax — employees settle it themselves; the employer files the yearly Employer\'s Return (BIR56A / IR56B) in April.')}
+			{/if}
+		</div>
+	{/if}
 
 	{#key mapVersion}
 		{#if activeTab === 'vat'}

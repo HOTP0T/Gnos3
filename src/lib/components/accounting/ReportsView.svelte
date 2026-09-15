@@ -74,7 +74,7 @@
 
 	<!-- Report content -->
 	{#if activeReport === 'statements'}
-		<StatutoryStatements {companyId} layoutLabel={statementLayout?.label ?? null} />
+		<StatutoryStatements {companyId} layoutLabel={statementLayout?.label ?? null} layoutKey={statementLayout?.layout ?? null} presentation={statementLayout?.presentation ?? null} />
 	{:else if activeReport === 'general-ledger'}
 		<GeneralLedger {companyId} />
 	{:else if activeReport === 'trial-balance'}

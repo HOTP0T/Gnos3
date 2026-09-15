@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, getContext } from 'svelte';
+	import { buildMonthOptions, type MonthOption } from '$lib/utils/fiscalYear';
 	import { toast } from 'svelte-sonner';
 	import { getBalanceSheet, getPeriods, getCompany, exportBalanceSheet } from '$lib/apis/accounting';
 	import type { Writable } from 'svelte/store';
@@ -35,29 +36,9 @@
 
 	// Month picker — user picks a month, we derive as_of and period_start from fiscal year
 	let selectedMonth = '';
-	let monthOptions: Array<{ value: string; label: string; asOf: string; fiscalStart: string }> = [];
+	let monthOptions: MonthOption[] = [];
 
-	function buildMonthOptions(periods: any[]) {
-		const options: typeof monthOptions = [];
-		for (const p of periods) {
-			const start = new Date(p.start_date);
-			const end = new Date(p.end_date);
-			const fiscalStart = p.start_date;
-			let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-			while (cursor <= end) {
-				const y = cursor.getFullYear();
-				const m = cursor.getMonth();
-				const lastDay = new Date(y, m + 1, 0).getDate();
-				const endDate = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-				const label = cursor.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
-				options.push({ value: `${y}-${String(m + 1).padStart(2, '0')}`, label, asOf: endDate, fiscalStart });
-				cursor = new Date(y, m + 1, 1);
-			}
-		}
-		const seen = new Map<string, typeof options[0]>();
-		for (const o of options) seen.set(o.value, o);
-		return Array.from(seen.values()).sort((a, b) => b.value.localeCompare(a.value));
-	}
+	let fiscalStartMonth = 1;
 
 	onMount(async () => {
 		try {
@@ -66,7 +47,8 @@
 				getCompany(companyId)
 			]);
 			const periods = res.periods ?? res ?? [];
-			monthOptions = buildMonthOptions(periods);
+			fiscalStartMonth = Number(company?.fiscal_year_start_month ?? 1) || 1;
+			monthOptions = buildMonthOptions(periods, fiscalStartMonth);
 
 			const country = (company?.country ?? '').trim().toLowerCase();
 			isFrench = country === 'france' || country === 'fr';
