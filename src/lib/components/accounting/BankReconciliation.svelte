@@ -602,7 +602,7 @@
 
 	const statusLabel = (s: string) => {
 		switch (s) {
-			case 'auto_matched': return 'Auto';
+			case 'auto_matched': return 'Auto-Matched';
 			case 'manual_matched': return 'Matched';
 			case 'partial_matched': return 'Partial';
 			case 'excluded': return 'Excluded';
@@ -1122,9 +1122,6 @@
 										<span class="text-[10px] px-1.5 py-0.5 rounded font-medium {statusColor(line.match_status)}">
 											{$i18n.t(statusLabel(line.match_status))}
 										</span>
-										{#if line.match_status === 'auto_matched' && line.match_confidence}
-											<span class="text-[10px] text-gray-400">{Math.round(parseFloat(line.match_confidence) * 100)}%</span>
-										{/if}
 										{#if line.match_status === 'partial_matched'}
 											<span class="text-[10px] text-orange-500 font-mono">{fmt(line.allocated_total)}/{fmt(Math.abs(parseFloat(line.amount)))}</span>
 										{/if}
@@ -1208,13 +1205,28 @@
 										{/if}
 									{:else}
 										<button class="text-xs text-red-500 hover:text-red-700 transition" on:click={() => handleUnmatch(line.id)}>{$i18n.t('Unmatch')}</button>
-										{#if line.payment_id}
-											<span class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
+										<!-- Posted = a posted entry moves this bank account (created from the line
+										     or booked earlier and matched). Offering "Post" on such a line would
+										     book the money a second time. -->
+										{#if line.posting?.bank_leg_status === 'posted'}
+											<span
+												class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300"
+												title={line.posting.source === 'settlement' ? $i18n.t('Payment entry created from this line') : $i18n.t('The matched entry already moves this bank account')}
+											>
 												{$i18n.t('Posted')}
 											</span>
+										{:else if line.posting?.bank_leg_status === 'draft'}
+											<a
+												href="/accounting/company/{companyId}/entries?id={line.posting.bank_leg_entry_id}"
+												class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50 transition"
+												title={$i18n.t('The entry that moves this bank account is still a draft — complete and post it under Entries')}
+											>
+												{$i18n.t('Draft entry')}
+											</a>
 										{:else}
 											<button
 												class="ml-1 px-2 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50 transition"
+												title={$i18n.t('The matched entry does not move this bank account — record the payment')}
 												on:click|stopPropagation={() => handlePay(line)}
 											>
 												{$i18n.t('Post')}
