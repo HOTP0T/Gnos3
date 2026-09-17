@@ -329,7 +329,7 @@
 						: 'bg-gray-400'}"
 				></span>
 				<span>
-					CPA-Qwen3 {aiStatus.available ? 'Online' : 'Offline'}
+					{$i18n.t('Accounting AI')} {aiStatus.available ? $i18n.t('Online') : $i18n.t('Offline')}
 					{#if aiStatus.model && aiStatus.available}
 						<span class="text-gray-400 dark:text-gray-500">({aiStatus.model})</span>
 					{/if}

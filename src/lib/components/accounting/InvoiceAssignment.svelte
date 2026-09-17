@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, getContext } from 'svelte';
+	import { onMount, onDestroy, getContext } from 'svelte';
 	import type { Writable } from 'svelte/store';
 	import { toast } from 'svelte-sonner';
 
@@ -16,6 +16,7 @@
 		getAccountingAiStatus,
 		aiCategorizeInvoice,
 		aiCategorizeAll,
+		getAiCategorizeAllStatus,
 		downloadInvoicePdf,
 		getEmployees,
 		getExpenseCategories
@@ -118,6 +119,68 @@
 	// AI activity indicator
 	let aiActivity = '';
 	let aiProcessingIds: Set<number> = new Set();
+
+	// "AI Categorize All" runs on the worker, one task per invoice. The rows are
+	// marked `queued` server-side; poll until none are left so the banner and
+	// the per-row spinners reflect real progress instead of a fire-and-forget toast.
+	const AI_POLL_MS = 4000;
+	const AI_POLL_MAX_MS = 30 * 60 * 1000;
+	let aiBatchTotal = 0;
+	let aiBatchRemaining = 0;
+	let aiPollTimer: ReturnType<typeof setInterval> | null = null;
+	let aiPollStartedAt = 0;
+
+	const stopAiPolling = () => {
+		if (aiPollTimer) clearInterval(aiPollTimer);
+		aiPollTimer = null;
+		aiBatchTotal = 0;
+		aiBatchRemaining = 0;
+	};
+
+	const updateAiBanner = () => {
+		const done = Math.max(aiBatchTotal - aiBatchRemaining, 0);
+		aiActivity = $i18n.t('AI is suggesting accounts — {{done}} of {{total}} done', { done, total: aiBatchTotal });
+	};
+
+	const pollAiBatch = async () => {
+		try {
+			const s = await getAiCategorizeAllStatus(companyId);
+			aiBatchRemaining = s.queued ?? 0;
+		} catch (e: any) {
+			// Session expired or access revoked: stop, otherwise this tab keeps
+			// feeding the module's auth-failure rate limiter every few seconds
+			// and locks the whole browser out of the API.
+			if (e?.status === 401 || e?.status === 403) {
+				stopAiPolling();
+				aiActivity = '';
+				return;
+			}
+			return; // transient — keep polling
+		}
+		await loadCompanyInvoices({ keepSelection: true });
+		if (aiBatchRemaining === 0) {
+			stopAiPolling();
+			aiActivity = '';
+			toast.success($i18n.t('AI suggestions ready — review the highlighted accounts'));
+			return;
+		}
+		if (Date.now() - aiPollStartedAt > AI_POLL_MAX_MS) {
+			stopAiPolling();
+			aiActivity = '';
+			toast.info($i18n.t('AI is still working in the background — refresh later to see the rest'));
+			return;
+		}
+		updateAiBanner();
+	};
+
+	const startAiPolling = (total: number, remaining: number) => {
+		stopAiPolling();
+		aiBatchTotal = total;
+		aiBatchRemaining = remaining;
+		aiPollStartedAt = Date.now();
+		updateAiBanner();
+		aiPollTimer = setInterval(pollAiBatch, AI_POLL_MS);
+	};
 
 	// Account lookup for categorization display
 	let accountMap: Record<string, string> = {};
@@ -322,7 +385,7 @@
 	$: allCompanySelected = filteredCompany.length > 0 && filteredCompany.every((i) => selectedCompanyIds.has(i.id));
 	$: allUnassignedSelected = unassignedInvoices.length > 0 && unassignedInvoices.every((i) => selectedUnassignedIds.has(i.id));
 
-	const loadCompanyInvoices = async () => {
+	const loadCompanyInvoices = async (opts: { keepSelection?: boolean } = {}) => {
 		try {
 			const res = await getCompanyInvoices(companyId, {
 				q: searchCompany || undefined,
@@ -339,7 +402,7 @@
 			companyTotal = res.total ?? 0;
 			totalAmount = companyInvoices.reduce((s, i) => s + (parseFloat(i.total_amount) || 0), 0);
 			reviewCount = companyInvoices.filter((i) => i.needs_review).length;
-			selectedCompanyIds = new Set();
+			if (!opts.keepSelection) selectedCompanyIds = new Set();
 		} catch (err) { toast.error(`${err}`); }
 	};
 
@@ -526,9 +589,14 @@
 		aiCategorizing = true;
 		try {
 			const result = await aiCategorizeAll(companyId);
-			toast.success(
-				result.message ?? $i18n.t('{{n}} invoice(s) queued for AI suggestion — refresh to see them as they complete', { n: result.queued ?? 0 })
-			);
+			const queued = result.queued ?? 0;
+			if (queued === 0) {
+				toast.info($i18n.t('Nothing to categorize — every invoice already has an account'));
+				return;
+			}
+			toast.success($i18n.t('{{n}} invoice(s) queued for AI suggestion', { n: queued }));
+			await loadCompanyInvoices({ keepSelection: true }); // rows now carry `queued`
+			startAiPolling(queued, queued);
 		} catch (e) {
 			toast.error($i18n.t('AI categorization failed'));
 		} finally {
@@ -537,16 +605,21 @@
 	}
 
 	async function handleAiCategorizeOne(invoiceId: number) {
+		aiProcessingIds.add(invoiceId);
+		aiProcessingIds = aiProcessingIds;
 		try {
 			const result = await aiCategorizeInvoice(invoiceId);
 			if (result.status === 'suggested') {
 				toast.success($i18n.t(`AI suggests: ${result.account_code} (${result.reasoning})`));
-				await loadCompanyInvoices();
+				await loadCompanyInvoices({ keepSelection: true });
 			} else {
 				toast.info($i18n.t('AI could not determine account'));
 			}
 		} catch (e) {
 			toast.error($i18n.t('AI categorization failed'));
+		} finally {
+			aiProcessingIds.delete(invoiceId);
+			aiProcessingIds = aiProcessingIds;
 		}
 	}
 
@@ -562,7 +635,13 @@
 		getAccountingAiStatus()
 			.then((s) => (aiAvailable = s.available))
 			.catch(() => (aiAvailable = false));
+		// A batch started earlier (or on another tab) may still be running
+		getAiCategorizeAllStatus(companyId)
+			.then((s) => { if ((s.queued ?? 0) > 0) startAiPolling(s.queued, s.queued); })
+			.catch(() => {});
 	});
+
+	onDestroy(stopAiPolling);
 </script>
 
 {#if loading}
@@ -687,15 +766,15 @@
 				<div class="flex items-center gap-2 mb-2">
 					<button
 						class="px-3 py-1.5 text-xs rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition disabled:opacity-50 flex items-center gap-1.5"
-						disabled={aiCategorizing}
+						disabled={aiCategorizing || aiBatchTotal > 0}
 						on:click={handleAiCategorizeAll}
 					>
-						{#if aiCategorizing}
+						{#if aiCategorizing || aiBatchTotal > 0}
 							<Spinner className="size-3" />
 						{/if}
 						{$i18n.t('AI Categorize All')}
 					</button>
-					<span class="text-[10px] text-gray-400">{$i18n.t('CPA-Qwen3 will suggest accounts for uncategorized invoices')}</span>
+					<span class="text-[10px] text-gray-400">{$i18n.t('The accounting AI will suggest an account for every invoice without one (vendors with a rule use the rule)')}</span>
 				</div>
 			{/if}
 
@@ -752,6 +831,11 @@
 									<td class="px-2 py-1.5" on:click|stopPropagation>
 										{#if inv.final_account_code}
 											<button class="text-[10px] px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/50 transition cursor-pointer" title="{accountLabel(inv.final_account_code)} — {$i18n.t('click to change')}" on:click={() => openAccountPicker(inv)}>{inv.final_account_code}</button>
+										{:else if inv.categorization_status === 'queued' || aiProcessingIds.has(inv.id)}
+											<span class="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-300" title={$i18n.t('AI is suggesting an account for this invoice')}>
+												<Spinner className="size-2.5" />
+												{$i18n.t('AI…')}
+											</span>
 										{:else if inv.suggested_account_code}
 											<button class="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-800/50 transition" title="{$i18n.t('AI suggestion')}: {accountLabel(inv.suggested_account_code)}" on:click={() => openAccountPicker(inv)}>{inv.suggested_account_code} ?</button>
 										{:else}

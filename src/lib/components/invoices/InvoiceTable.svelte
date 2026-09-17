@@ -5,7 +5,7 @@
 	import dayjs from 'dayjs';
 	import { browser } from '$app/environment';
 
-	import { getInvoices, updateInvoice, deleteInvoice, reprocessInvoice, markInvoiceReviewed, getTags } from '$lib/apis/invoices';
+	import { getInvoices, updateInvoice, deleteInvoice, reprocessInvoice, markInvoiceReviewed, getTags, getInvoiceStats } from '$lib/apis/invoices';
 	import { getCompanies, getEmployees, getExpenseCategories } from '$lib/apis/accounting';
 
 	import Pagination from '$lib/components/common/Pagination.svelte';
@@ -420,9 +420,45 @@
 	onDestroy(() => {
 		window.removeEventListener('mousemove', onResizeMove);
 		window.removeEventListener('mouseup', onResizeUp);
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+			refreshInterval = null;
+		}
 	});
 
 	let mounted = false;
+
+	// Background refresh: poll the cheap /stats heartbeat while the page is open so
+	// invoices uploaded to K4mi after the table was loaded appear as "processing",
+	// and rows flip to their final status when extraction finishes.
+	const POLL_INTERVAL_MS = 5000;
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let polling = false;
+	let lastStats: { processing: number; total: number } | null = null;
+
+	const pollStats = async () => {
+		// Never yank rows out from under an inline edit or an open preview.
+		if (polling || loading || editingCell || showPreview) return;
+		polling = true;
+		try {
+			const stats = await getInvoiceStats(localStorage.token);
+			if (!stats) return;
+			const next = { processing: stats.processing ?? 0, total: stats.total ?? 0 };
+			const changed =
+				lastStats !== null &&
+				(next.processing !== lastStats.processing || next.total !== lastStats.total);
+			lastStats = next;
+			// Reload while anything is in flight (statuses change as extractions
+			// finish) and once more when the counts settle.
+			if (next.processing > 0 || changed) {
+				await loadInvoices();
+			}
+		} catch {
+			// transient — next tick retries
+		} finally {
+			polling = false;
+		}
+	};
 
 	// React to page changes only after initial load
 	$: if (mounted && page) {
@@ -451,6 +487,7 @@
 
 		loadInvoices().then(() => {
 			mounted = true;
+			refreshInterval = setInterval(pollStats, POLL_INTERVAL_MS);
 		});
 		getTags(localStorage.token).then((t) => (availableTags = t));
 		loadAccountingLookups();

@@ -33,7 +33,13 @@
 	// Processing invoices
 	let processingCount = 0;
 	let processingInvoices: any[] = [];
+
+	// Background refresh: a cheap /stats heartbeat runs for as long as the page is
+	// mounted, so an invoice uploaded to K4mi *after* the dashboard was opened
+	// still shows up as "processing" without a manual reload.
+	const POLL_INTERVAL_MS = 5000;
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let polling = false;
 
 	// Chart instances
 	let monthlyCanvas: HTMLCanvasElement;
@@ -42,8 +48,8 @@
 	let vendorChart: any = null;
 	let Chart: any = null;
 
-	const loadData = async () => {
-		loading = true;
+	const loadData = async ({ silent = false } = {}) => {
+		if (!silent) loading = true;
 		try {
 			const [stats, vendors, monthly, byVendor, review, processing] = await Promise.all([
 				getInvoiceStats(localStorage.token),
@@ -62,20 +68,48 @@
 			processingCount = stats?.processing ?? 0;
 			processingInvoices = (processing?.invoices ?? []).slice(0, 10);
 
-			monthlyData = monthly ?? [];
-			vendorData = (byVendor ?? []).slice(0, 10);
+			const nextMonthly = monthly ?? [];
+			const nextVendor = (byVendor ?? []).slice(0, 10);
+			const chartsChanged =
+				JSON.stringify(nextMonthly) !== JSON.stringify(monthlyData) ||
+				JSON.stringify(nextVendor) !== JSON.stringify(vendorData);
+			monthlyData = nextMonthly;
+			vendorData = nextVendor;
 
-			// Auto-refresh every 5 seconds while invoices are processing
-			if (processingCount > 0 && !refreshInterval) {
-				refreshInterval = setInterval(() => loadData(), 5000);
-			} else if (processingCount === 0 && refreshInterval) {
-				clearInterval(refreshInterval);
-				refreshInterval = null;
+			// A silent reload keeps the page on screen; the reactive block below only
+			// rebuilds the charts on the initial (non-silent) load, so redraw here
+			// when the spending data actually moved.
+			if (silent && chartsChanged) {
+				createCharts();
 			}
 		} catch (err) {
-			toast.error(`${err}`);
+			if (!silent) toast.error(`${err}`);
 		}
-		loading = false;
+		if (!silent) loading = false;
+	};
+
+	const pollStats = async () => {
+		if (polling || loading) return;
+		polling = true;
+		try {
+			const stats = await getInvoiceStats(localStorage.token);
+			if (!stats) return;
+			const remoteProcessing = stats.processing ?? 0;
+			const remoteTotal = stats.total ?? 0;
+			// Reload while anything is in flight (the processing list changes as
+			// extractions finish), and once more when the counts settle.
+			if (
+				remoteProcessing > 0 ||
+				remoteProcessing !== processingCount ||
+				remoteTotal !== totalInvoices
+			) {
+				await loadData({ silent: true });
+			}
+		} catch {
+			// transient — next tick retries
+		} finally {
+			polling = false;
+		}
 	};
 
 	const createCharts = async () => {
@@ -219,6 +253,7 @@
 
 	onMount(() => {
 		loadData();
+		refreshInterval = setInterval(pollStats, POLL_INTERVAL_MS);
 	});
 
 	onDestroy(() => {
