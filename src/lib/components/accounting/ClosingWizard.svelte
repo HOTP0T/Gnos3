@@ -41,12 +41,48 @@
 	// ─── Helpers ────────────────────────────────────────────────────────────────
 
 	let fiscalStartMonth = 1;
+	let currency = '';
 
 	const fmt = (v: any): string => {
 		const n = typeof v === 'string' ? parseFloat(v) : (v ?? 0);
 		if (n === 0) return '0.00';
 		return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 	};
+
+	// The checklist API speaks English. The base steps are rebuilt here from their
+	// stable `step` + `count` so the wizard follows the UI language; anything else
+	// (country-specific checks, free-text details) goes through t() and falls back
+	// to the API text when no translation exists.
+	const checkLabel = (check: any): string => $i18n.t(check.label ?? check.name ?? '');
+
+	const checkDetail = (check: any): string => {
+		const n = Number(check.count ?? 0);
+		switch (check.step) {
+			case 'draft_entries':
+				return n > 0
+					? $i18n.t('{{count}} draft entries', { count: n })
+					: $i18n.t('All entries are posted');
+			case 'bank_reconciliation':
+				if (n > 0) return $i18n.t('{{count}} unmatched bank lines', { count: n });
+				break;
+			case 'trial_balance':
+				if (check.status !== 'ok' && check.difference != null) {
+					return $i18n.t('Unbalanced: difference of {{amount}}', {
+						amount: `${fmt(check.difference)} ${currency}`.trim()
+					});
+				}
+				break;
+		}
+		return check.detail ? $i18n.t(check.detail) : '';
+	};
+
+	const checkActionLabel = (check: any): string =>
+		check.action_label ? $i18n.t(check.action_label) : $i18n.t('Fix');
+
+	// Checks that stop the period from closing (`blocking` from the API); the
+	// API's `blockers` strings stay the fallback for older payloads.
+	const blockingChecks = (list: any): any[] =>
+		(list?.checks ?? []).filter((c: any) => c.blocking);
 
 	// ─── Data loading ───────────────────────────────────────────────────────────
 
@@ -56,6 +92,7 @@
 			const [res, co] = await Promise.all([getPeriods({ company_id: companyId }), getCompany(companyId).catch(() => null)]);
 			const periods = res.periods ?? res ?? [];
 			fiscalStartMonth = Number(co?.fiscal_year_start_month ?? 1) || 1;
+			currency = co?.currency ?? '';
 			monthOptions = buildMonthOptions(periods, fiscalStartMonth);
 
 			const now = new Date();
@@ -313,11 +350,19 @@
 						<div class="text-xs font-medium text-red-700 dark:text-red-300 mb-1">
 							{$i18n.t('Blockers')}
 						</div>
-						{#each checklist.blockers as blocker}
-							<div class="text-xs text-red-600 dark:text-red-400">
-								{blocker}
-							</div>
-						{/each}
+						{#if blockingChecks(checklist).length > 0}
+							{#each blockingChecks(checklist) as check}
+								<div class="text-xs text-red-600 dark:text-red-400">
+									{checkLabel(check)}{checkDetail(check) ? ` — ${checkDetail(check)}` : ''}
+								</div>
+							{/each}
+						{:else}
+							{#each checklist.blockers as blocker}
+								<div class="text-xs text-red-600 dark:text-red-400">
+									{$i18n.t(blocker)}
+								</div>
+							{/each}
+						{/if}
 					</div>
 				{/if}
 
@@ -330,11 +375,11 @@
 							</div>
 							<div class="flex-1 min-w-0">
 								<div class="text-sm font-medium dark:text-gray-200">
-									{check.label ?? check.name ?? ''}
+									{checkLabel(check)}
 								</div>
-								{#if check.detail}
+								{#if checkDetail(check)}
 									<div class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-										{check.detail}
+										{checkDetail(check)}
 									</div>
 								{/if}
 							</div>
@@ -343,7 +388,7 @@
 									class="px-3 py-1 text-xs font-medium rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40 transition flex-shrink-0"
 									on:click={() => handleCheckAction(check)}
 								>
-									{check.action_label ?? $i18n.t('Fix')}
+									{checkActionLabel(check)}
 								</button>
 							{/if}
 						</div>

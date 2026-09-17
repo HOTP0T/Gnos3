@@ -1061,7 +1061,7 @@ export const downloadExchangeRateTemplate = async () => {
 	URL.revokeObjectURL(a.href);
 };
 
-// ── Accounting AI (CPA-Qwen3) ──────────────────────────────────
+// ── Accounting AI ──────────────────────────────────
 
 export const getAccountingAiStatus = async () => {
 	const res = await fetch(`${INVOICE_API_BASE_URL}/api/accounting/ai/status`, {
@@ -1086,6 +1086,21 @@ export const aiCategorizeAll = async (companyId: number) => {
 		{ method: 'POST', headers: authHeaders() }
 	);
 	if (!res.ok) throw new Error('Bulk AI categorization failed');
+	return res.json();
+};
+
+/** How many invoices of the company are still waiting on an AI suggestion. */
+export const getAiCategorizeAllStatus = async (companyId: number): Promise<{ queued: number }> => {
+	const res = await fetch(
+		`${INVOICE_API_BASE_URL}/api/accounting/companies/${companyId}/ai-categorize-all/status`,
+		{ headers: authHeaders() }
+	);
+	if (!res.ok) {
+		// Callers poll this; they need the status to tell "auth gone" from "transient".
+		const err = new Error('Failed to get AI categorization status') as Error & { status?: number };
+		err.status = res.status;
+		throw err;
+	}
 	return res.json();
 };
 
