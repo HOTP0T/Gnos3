@@ -114,7 +114,7 @@
 	const openInvoicePreview = async (invoiceId: number) => {
 		previewLoading = true;
 		try {
-			const inv = await getInvoice('', invoiceId);
+			const inv = await getInvoice(localStorage.token, invoiceId);
 			previewInvoice = inv;
 			showPreview = true;
 		} catch (err) {
