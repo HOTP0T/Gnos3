@@ -76,21 +76,49 @@ export const openK4miDoc = async (
 ): Promise<void> => {
 	const { newTab = true, nextPath } = opts;
 	const next = nextPath ?? `/documents/${docId}/details`;
+
+	// Open the tab NOW, synchronously, while the click's user activation is
+	// still live. Minting the token needs a round trip, and a browser only
+	// honours window.open inside the gesture's own call stack -- called after
+	// an await it is treated as an unsolicited popup, blocked, and returns
+	// null WITHOUT throwing. That made this function report success while
+	// nothing opened and no error surfaced anywhere: the caller's catch never
+	// ran, so not even the bare-URL fallback fired.
+	//
+	// The handle cannot be obtained with 'noopener' (that makes window.open
+	// return null by design), so the window is opened bare and its opener
+	// severed manually below -- same end state, minus the silent failure.
+	let win: Window | null = null;
+	if (newTab) {
+		win = window.open('about:blank', '_blank');
+		if (!win) {
+			lastError = new Error('K4mi tab was blocked by the browser');
+			console.error('openK4miDoc:', lastError);
+			throw lastError;
+		}
+		try {
+			win.opener = null;
+		} catch {
+			/* best effort -- some browsers disallow writing opener */
+		}
+	}
+
 	try {
 		lastError = null;
 		const { token } = await getK4miExchangeToken(gnos3Token);
 		const url = buildK4miSSOUrl(token, next);
-		if (newTab) {
-			// noopener stops the new K4mi tab from reaching back into the
-			// Gnos3 window (window.opener); noreferrer hides the Gnos3 URL
-			// from K4mi's referrer header (defense in depth — secret is
-			// already in the URL fragment, no need to also expose where it
-			// came from).
-			window.open(url, '_blank', 'noopener,noreferrer');
+		if (win) {
+			win.location.replace(url);
 		} else {
 			window.location.assign(url);
 		}
 	} catch (err) {
+		// Don't strand an empty about:blank tab on failure.
+		try {
+			win?.close();
+		} catch {
+			/* ignore */
+		}
 		lastError = err instanceof Error ? err : new Error(String(err));
 		console.error('openK4miDoc failed:', lastError);
 		throw lastError;
