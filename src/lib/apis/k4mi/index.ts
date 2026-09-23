@@ -27,15 +27,19 @@ let lastError: Error | null = null;
 export const getK4miExchangeToken = async (
 	token: string
 ): Promise<K4miExchangeTokenResponse> => {
-	if (!token) {
-		throw new Error('not authenticated to Gnos3');
+	// Gnos3 authenticates by session cookie; a localStorage bearer token is
+	// only sometimes present (it is absent on a normal cookie login, which
+	// made every K4mi link fall through to the bare URL and land the user on
+	// K4mi's login page). Send the cookie always, and the bearer token only
+	// when we happen to have one.
+	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+	if (token) {
+		headers.Authorization = `Bearer ${token}`;
 	}
 	const res = await fetch(`${WEBUI_API_BASE_URL}/auths/k4mi/exchange-token`, {
 		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Authorization: `Bearer ${token}`
-		}
+		credentials: 'include',
+		headers
 	});
 	if (!res.ok) {
 		const body = await res.text().catch(() => '');

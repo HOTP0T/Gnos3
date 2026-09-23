@@ -30,15 +30,15 @@
 		if (!hasDoc) return;
 		e.preventDefault();
 		if (stopPropagation) e.stopPropagation();
+		// Do NOT bail when localStorage has no token. Gnos3 signs users in with
+		// a session cookie and only sometimes mirrors a bearer token into
+		// localStorage -- on a plain cookie login there is none, and this guard
+		// then sent every click to the bare K4mi URL, landing the user on
+		// K4mi's login page. The SSO hand-off never ran at all.
+		// openK4miDoc sends the session cookie; the bearer token is a bonus.
 		const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
-		if (!token) {
-			// Not signed in to Gnos3 — fall back to opening the bare K4mi URL.
-			// K4mi will redirect to its own login page; user can recover from there.
-			window.open(fallbackHref, '_blank', 'noopener,noreferrer');
-			return;
-		}
 		try {
-			await openK4miDoc(token, docId as number | string);
+			await openK4miDoc(token ?? '', docId as number | string);
 		} catch {
 			// openK4miDoc already logged; fall through to bare URL so the
 			// user lands somewhere rather than nowhere.
