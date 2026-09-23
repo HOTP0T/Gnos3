@@ -1555,6 +1555,77 @@ async def k4mi_exchange_token(
     return {'token': token, 'expires_at': expires_at}
 
 
+@router.get('/k4mi/open')
+async def k4mi_open(
+    request: Request,
+    doc_id: Optional[str] = None,
+    next: str = '/',
+    user=Depends(get_verified_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """Redirect the browser straight into K4mi, already signed in.
+
+    This is the click-time counterpart to /k4mi/exchange-token, and it exists
+    because the fetch-then-window.open approach fails silently in ways the
+    frontend cannot detect or report. If the browser blocks the popup, or the
+    page holds no localStorage bearer token (Gnos3 signs users in with a
+    session cookie and only sometimes mirrors one there), the hand-off never
+    runs and the user lands on K4mi's login page -- with no request ever
+    reaching this service, so nothing is logged anywhere.
+
+    A plain <a href> to this endpoint has none of those failure modes, and
+    right-click "open in new tab" and middle-click behave normally rather than
+    falling back to an unauthenticated URL.
+    """
+    import os
+    from urllib.parse import urlencode
+
+    user_groups = await Groups.get_groups_by_member_id(user.id, db=db)
+    group_names = [g.name for g in user_groups if g.name]
+    token, _expires_at = create_k4mi_exchange_token(
+        user,
+        groups=group_names,
+        mfa_verified=False,
+    )
+
+    # Where the BROWSER reaches K4mi -- not where this container reaches it.
+    # Mirrors the frontend's `http://${location.hostname}:8000`, so a user on
+    # a LAN address, a Tailscale address or localhost each get a URL that
+    # resolves for them. K4MI_PUBLIC_URL overrides it for split-DNS setups.
+    base = (os.environ.get('K4MI_PUBLIC_URL') or '').rstrip('/')
+    if not base:
+        host = (
+            request.headers.get('x-forwarded-host')
+            or request.headers.get('host')
+            or ''
+        ).split(':')[0]
+        if not host:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Cannot determine the K4mi URL for this request',
+            )
+        scheme = request.headers.get('x-forwarded-proto') or request.url.scheme
+        port = os.environ.get('K4MI_PUBLIC_PORT', '8000')
+        base = f'{scheme}://{host}:{port}'
+
+    # Only ever hand K4mi a path on K4mi itself. Same rules K4mi's own SSO view
+    # enforces on `next`: absolute path, not protocol-relative, no CR/LF.
+    target = f'/documents/{doc_id}/details' if doc_id else (next or '/')
+    if (
+        not target.startswith('/')
+        or target.startswith('//')
+        or '\r' in target
+        or '\n' in target
+    ):
+        target = '/'
+
+    qs = urlencode({'token': token, 'next': target})
+    return RedirectResponse(
+        url=f'{base}/sso/login?{qs}',
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 ############################
 # Finances SSO Bridge (module — ledger-sync)
 ############################
